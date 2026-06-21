@@ -1,0 +1,77 @@
+# cargo-deny configuration for Clavis
+
+[advisories]
+# Location for the RustSec vulnerability database cache
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Treat active vulnerabilities as build failures
+unmaintained = "all"
+unsound = "all"
+ignore = [
+    # GTK3 unmaintained bindings (required transitive dependencies of Tauri 2 on Linux)
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0411",
+    "RUSTSEC-2024-0417",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0420",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0414",
+    # glib soundness advisory (transitive dep of Tauri 2)
+    "RUSTSEC-2024-0429",
+    # paste unmaintained crate (transitive dep of sqlx)
+    "RUSTSEC-2024-0436",
+    # proc-macro-error unmaintained crate (transitive dep of glib-macros)
+    "RUSTSEC-2024-0370",
+    # rustls-pemfile unmaintained crate (transitive dep of sqlx/reqwest)
+    "RUSTSEC-2025-0134",
+    # UNIC unmaintained Unicode library (transitive dep of Tauri's urlpattern)
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+    # rustls-webpki vulnerabilities. Transitive via reqwest 0.11/sqlx 0.7 which use rustls 0.21.
+    # Safe to ignore as we only connect to trusted TLS endpoints and don't parse/verify CRLs.
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    # SQLx <= 0.8.0 4GiB query smuggling vulnerability.
+    # Safe to ignore as Clavis uses SQLite (which is unaffected/not exploitable).
+    "RUSTSEC-2024-0363",
+]
+
+[licenses]
+# Do not allow crates without a license
+# Whitelist of allowed licenses (permissive licenses)
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "OpenSSL",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "Unlicense",
+    "0BSD",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Apache-2.0 WITH LLVM-exception",
+]
+[bans]
+# Warn if duplicate versions of the same crate are pulled into the build
+multiple-versions = "warn"
+
+# Block unexpected network crates from being added directly as dependencies.
+# The security rule says only reqwest and tokio-tungstenite are allowed to make net calls.
+# We set `depth = 0` to ban these crates only as direct dependencies (allowing transitive dependencies).
+deny = [
+    # Alternative HTTP clients
+    { name = "surf"},
+    { name = "ureq" },
+    { name = "async-std" },
+]

@@ -435,6 +435,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "hex",
+ "libsqlite3-sys",
  "reqwest 0.11.27",
  "ring",
  "secrecy",

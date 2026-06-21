@@ -38,7 +38,18 @@ pub async fn unlock_vault(
     // 4. Connect to SQLCipher (this implicitly verifies the key via migrations/schema access)
     let pool = match connect_to_db(&db_path, &key_bytes).await {
         Ok(pool) => pool,
-        Err(_) => return Err(Error::InvalidPassword),
+        Err(e) => {
+            let err_msg = e.to_string().to_lowercase();
+            // If the error is due to decryption failing, return InvalidPassword.
+            // Otherwise, fail fast and return the migration/database error.
+            if err_msg.contains("file is not a database")
+                || err_msg.contains("file is encrypted")
+                || err_msg.contains("not a database")
+            {
+                return Err(Error::InvalidPassword);
+            }
+            return Err(e);
+        }
     };
 
     // 5. Store session key and connection pool

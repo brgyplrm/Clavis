@@ -1,0 +1,80 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout the repository code
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2. Install Ubuntu system dependencies required by Tauri 2
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          patchelf \
+          build-essential \
+          curl \
+          wget \
+          libssl-dev \
+          libgtk-3-dev
+
+    # 3. Set up Node.js environment
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'npm'
+
+    # 4. Install frontend dependencies and build frontend
+    # (Tauri's cargo build will fail if frontend assets are missing)
+    - name: Install frontend dependencies & Build
+      run: |
+        npm install
+        npm run build
+
+    # 5. Set up Rust toolchain and cache dependencies
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Rust Cache
+      uses: swatinem/rust-cache@v2
+      with:
+        workspaces: "./src-tauri -> target"
+
+    # 6. Run Cargo Check (verify compilation)
+    - name: Cargo check
+      run: cargo check --manifest-path src-tauri/Cargo.toml
+
+    # 7. Run Cargo Tests
+    - name: Cargo test
+      run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 8. Check dependencies for security advisories (Cargo Audit)
+    - name: Cargo audit
+      uses: rustsec/audit-check@v2.0.0
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    # 9. Verify licenses and duplicate crates (Cargo Deny)
+    - name: Cargo deny
+      uses: embark-studios/cargo-deny-action@v2
+      with:
+        manifest-path: src-tauri/Cargo.toml
