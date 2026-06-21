@@ -1,0 +1,58 @@
+# Rust
+target/
+Cargo.lock.bak
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# Tauri build output
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/gen/
+
+# Vite
+.vite/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# SQLCipher vault files — never commit user data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+coverage/
+lcov.info
+
+# Tauri updater keys — private key must never be committed
+src-tauri/updater-key.pem
+*.pem
+*.key
+
+# cargo audit and deny cache
+.cargo/advisory-db/
