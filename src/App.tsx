@@ -1,52 +1,216 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import { useVaultStore } from "./hooks/useVaultStore";
+import Setup from "./pages/Setup";
+import Unlock from "./pages/Unlock";
+import Dashboard from "./pages/Dashboard";
+import Security from "./pages/Security";
+import Authenticator from "./pages/Authenticator";
+import ActivityLog from "./pages/ActivityLog";
+import Settings from "./pages/Settings";
+import { 
+  LayoutList, ShieldAlert, Clock, ScrollText, Settings as SettingsIcon, 
+  Lock, ShieldCheck, Sun, Moon 
+} from "lucide-react";
+import { cn } from "./lib/utils";
 import "./index.css";
-import "./App.css"; // Add this line back
-import { Button } from "./components/ui/button";
+
+type PageView = "dashboard" | "security" | "authenticator" | "activity" | "settings";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const {
+    isLocked,
+    checkInitialization,
+    checkLockStatus,
+    lock,
+  } = useVaultStore();
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  const [checking, setChecking] = useState(true);
+  const [setupFinished, setSetupFinished] = useState(false);
+  const [startedSetup, setStartedSetup] = useState(false);
+
+  // Router view state
+  const [currentView, setCurrentView] = useState<PageView>("dashboard");
+  const [isDark, setIsDark] = useState(true);
+  const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    const initStore = async () => {
+      await checkInitialization();
+      await checkLockStatus();
+      
+      const initialized = useVaultStore.getState().isInitialized;
+      setStartedSetup(!initialized);
+      
+      setChecking(false);
+    };
+    initStore();
+  }, [checkInitialization, checkLockStatus]);
+
+  // Handle Theme Toggle
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+  }, [isDark]);
+
+  if (checking) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background text-foreground">
+        <div className="flex flex-col items-center gap-2">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple border-t-transparent" />
+          <p className="text-sm text-muted-foreground font-medium">Checking vault status...</p>
+        </div>
+      </div>
+    );
   }
 
+  // If not initialized yet and setup is not marked complete, show the setup screen
+  if (startedSetup && !setupFinished) {
+    return <Setup onComplete={() => setSetupFinished(true)} />;
+  }
+
+  // If initialized but locked, show the unlock screen
+  if (isLocked) {
+    return <Unlock />;
+  }
+
+  // Handle actual lock action confirm
+  const handleLockConfirm = async () => {
+    setLockConfirmOpen(false);
+    await lock();
+    setCurrentView("dashboard"); // reset view
+  };
+
+  const navItems = [
+    { id: "dashboard" as PageView, icon: LayoutList, label: "Dashboard" },
+    { id: "security" as PageView, icon: ShieldAlert, label: "Security Reports" },
+    { id: "authenticator" as PageView, icon: Clock, label: "TOTP Authenticator" },
+    { id: "activity" as PageView, icon: ScrollText, label: "Activity Log" },
+  ];
+
+  // Render the current view page
+  const renderViewContent = () => {
+    switch (currentView) {
+      case "dashboard":
+        return <Dashboard />;
+      case "security":
+        return <Security />;
+      case "authenticator":
+        return <Authenticator />;
+      case "activity":
+        return <ActivityLog />;
+      case "settings":
+        return <Settings />;
+    }
+  };
+
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <div className="flex h-screen w-full bg-background text-foreground select-none overflow-hidden font-sans">
+      
+      {/* NARROW FIXED SIDEBAR (56px wide) */}
+      <aside className="w-14 h-screen shrink-0 flex flex-col justify-between border-r border-border bg-sidebar py-3 items-center z-20">
+        
+        {/* Top Section: Navigation */}
+        <div className="flex flex-col items-center gap-1.5 w-full">
+          {/* Logo */}
+          <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-purple text-white shadow-md shadow-purple/20">
+            <ShieldCheck size={20} />
+          </div>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+          {navItems.map((item) => {
+            const active = currentView === item.id;
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCurrentView(item.id)}
+                title={item.label}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200",
+                  active 
+                    ? "bg-purple-soft text-purple" 
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <Icon size={18} />
+              </button>
+            );
+          })}
+        </div>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <Button type="submit">Greet</Button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+        {/* Bottom Section: Theme, Settings, and Lock */}
+        <div className="flex flex-col items-center gap-1.5 w-full">
+          {/* Night / Light Mode Toggle */}
+          <button
+            onClick={() => setIsDark(d => !d)}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {isDark ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
+
+          {/* Settings button */}
+          <button
+            onClick={() => setCurrentView("settings")}
+            title="Settings"
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200",
+              currentView === "settings" 
+                ? "bg-purple-soft text-purple" 
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <SettingsIcon size={17} />
+          </button>
+
+          {/* Red Lock Vault Button */}
+          <button
+            onClick={() => setLockConfirmOpen(true)}
+            title="Lock Vault"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
+          >
+            <Lock size={17} />
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <main className="flex-1 min-w-0 h-screen relative">
+        {renderViewContent()}
+      </main>
+
+      {/* LOCK VAULT CONFIRMATION DIALOG (Modal 5) */}
+      {lockConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-5 shadow-xl space-y-4 animate-scale-up text-foreground">
+            <div className="flex gap-3">
+              <div className="h-10 w-10 shrink-0 rounded-full bg-purple/10 flex items-center justify-center text-purple">
+                <Lock size={18} />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold">Lock your vault?</h2>
+                <p className="text-xs text-muted-foreground leading-normal">
+                  Your session will end and the vault key will be cleared from memory.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1 border-t border-border/40">
+              <button
+                onClick={() => setLockConfirmOpen(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-border bg-transparent text-xs font-semibold hover:bg-muted text-muted-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLockConfirm}
+                className="px-3.5 py-1.5 rounded-lg bg-purple text-white text-xs font-semibold hover:bg-purple/90 transition-colors"
+              >
+                Lock now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
   );
 }
 

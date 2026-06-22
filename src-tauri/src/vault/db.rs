@@ -46,26 +46,21 @@ pub fn get_db_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf)> {
 
     /// Connects to SQLCipher database using the derived 32-byte key.
     pub async fn connect_to_db(db_path: &PathBuf, derived_key: &[u8; 32]) -> Result<SqlitePool> {
-        // Format the binary key to SQLCipher hex syntax: x'HEX_STRING'
-        let hex_key = hex::encode(derived_key);
-        let key_pragma = format!("x'{}'", hex_key);
+      // Format the binary key to SQLCipher hex syntax: "x'HEX_STRING'"
+      let hex_key = hex::encode(derived_key);
+      let key_pragma = format!("\"x'{}'\"", hex_key);
 
         let options = SqliteConnectOptions::new()
             .filename(db_path)
-            .create_if_missing(true);
+            .create_if_missing(true)
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .pragma("key", key_pragma)
+            .pragma("foreign_keys", "ON")
+		        .pragma("journal_mode", "WAL")
+            .pragma("synchronous", "NORMAL");
 
         let pool = SqlitePoolOptions::new()
-            .after_connect(move |conn, _meta| {
-                let key = key_pragma.clone();
-                Box::pin(async move {
-                    // Unlock SQLCipher database using PRAGMA key
-                    sqlx::query(&format!("PRAGMA key = {};", key))
-                        .execute(conn)
-                        .await?;
-                    Ok(())
-                })
-            })
-            
+            .max_connections(5)
             .connect_with(options)
             .await?;
 

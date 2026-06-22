@@ -53,6 +53,7 @@
         let pool = match connect_to_db(&db_path, &key_bytes).await {
             Ok(pool) => pool,
             Err(e) => {
+                println!("DEBUG: Connection error during unlock: {:?}", e);
                 let err_msg = e.to_string().to_lowercase();
                 // If the error is due to decryption failing, return InvalidPassword.
                 // Otherwise, fail fast and return the migration/database error.
@@ -386,3 +387,11 @@
             .await?;
         Ok(())
     }
+
+    /// Checks if the vault has been initialized (i.e., if the salt file exists).
+    #[tauri::command]
+    pub fn is_vault_initialized(app_handle: AppHandle) -> Result<bool> {
+        let (_, salt_path) = get_db_paths(&app_handle)?;
+        Ok(salt_path.exists())
+    }
+    
