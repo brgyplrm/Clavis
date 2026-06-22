@@ -3,7 +3,7 @@ pub mod crypto;
 pub mod vault;
 
 use std::sync::Mutex;
-use vault::command::{AppState, unlock_vault, lock_vault, is_vault_locked};
+use vault::command::{AppState, unlock_vault, lock_vault, is_vault_locked, create_vault, list_vaults, delete_vault, create_entry, list_entries, get_entry, update_entry, delete_entry};
 
 // Add the greet command back:
 #[tauri::command]
@@ -24,7 +24,15 @@ pub fn run() {
           greet,
           unlock_vault,
           lock_vault,
-          is_vault_locked
+          is_vault_locked,
+          create_vault,
+          list_vaults,
+          delete_vault,
+          create_entry,
+          list_entries,
+          get_entry,
+          update_entry,
+          delete_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
