@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useVaultStore } from "../hooks/useVaultStore";
 import { getEntry, DecryptedEntry, EntrySummary } from "../lib/tauri";
 import { logEvent } from "../lib/activity";
+import TotpDisplay from "../components/TotpDisplay";
 import { 
   Plus, Trash2, Search, Copy, Eye, EyeOff, 
   Edit, X, AlertTriangle, QrCode, Check,
@@ -105,35 +106,7 @@ export function initials(name: string) {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-// TOTP helpers
-export function totpCode(secret: string, now = Date.now()) {
-  const window = Math.floor(now / 30000);
-  let h = 0;
-  const s = secret + window;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return String(h % 1000000).padStart(6, "0");
-}
 
-export function totpRemaining(now = Date.now()) {
-  return 30 - Math.floor((now / 1000) % 30);
-}
-
-// Countdown Ring component
-export function CountdownRing({ remaining, total = 30, size = 36, color }: { remaining: number; total?: number; size?: number; color?: string }) {
-  const stroke = 3;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const pct = remaining / total;
-  const dash = c * pct;
-  const stroke_ = color ?? (remaining <= 5 ? "var(--color-danger)" : "var(--color-purple)");
-  return (
-    <svg width={size} height={size} className="-rotate-90 shrink-0">
-      <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--color-border)" strokeWidth={stroke} fill="none" />
-      <circle cx={size / 2} cy={size / 2} r={r} stroke={stroke_} strokeWidth={stroke} fill="none"
-        strokeDasharray={`${dash} ${c}`} strokeLinecap="round" className="transition-[stroke-dasharray] duration-500" />
-    </svg>
-  );
-}
 
 export default function Dashboard() {
   const {
@@ -248,17 +221,10 @@ export default function Dashboard() {
   // Autotype Timer state
   const [autotypeTimer, setAutotypeTimer] = useState(3);
 
-  const [now, setNow] = useState(Date.now());
-
   // Focus inline inputs when displayed
   useEffect(() => { if (showTagInput) tagInputRef.current?.focus(); }, [showTagInput]);
   useEffect(() => { if (showFilterInput) filterInputRef.current?.focus(); }, [showFilterInput]);
   useEffect(() => { if (showVaultInput) vaultInputRef.current?.focus(); }, [showVaultInput]);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Fetch vaults on mount
   useEffect(() => {
@@ -684,10 +650,7 @@ export default function Dashboard() {
     return () => window.removeEventListener("click", clickOutside);
   }, []);
 
-  const remainingSeconds = totpRemaining(now);
-  const currentTotp = decryptedEntry?.totp_secret 
-    ? totpCode(decryptedEntry.totp_secret, now) 
-    : null;
+
 
   return (
     <div className="flex h-screen flex-1 min-w-0 bg-background text-foreground overflow-hidden">
@@ -1179,22 +1142,11 @@ export default function Dashboard() {
                   </div>
 
                   {/* TOTP Field */}
-                  {currentTotp && decryptedEntry.totp_secret && (
+                  {decryptedEntry.totp_secret && (
                     <div className="space-y-1">
                       <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">TOTP Code</div>
-                      <div className="flex items-center justify-between rounded-md border border-border bg-background p-2.5">
-                        <div>
-                          <div 
-                            className="font-mono text-base font-bold tracking-wider" 
-                            style={{ color: remainingSeconds <= 5 ? "var(--color-danger)" : "var(--color-purple)" }}
-                          >
-                            {currentTotp.slice(0, 3)} {currentTotp.slice(3)}
-                          </div>
-                          <div className="mt-0.5 text-[8px] text-muted-foreground">
-                            expires in {remainingSeconds}s
-                          </div>
-                        </div>
-                        <CountdownRing remaining={remainingSeconds} />
+                      <div className="rounded-md border border-border bg-background p-2 flex items-center justify-between">
+                        <TotpDisplay entryId={decryptedEntry.id} />
                       </div>
                     </div>
                   )}

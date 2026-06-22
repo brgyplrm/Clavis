@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Represents a vault container.
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]

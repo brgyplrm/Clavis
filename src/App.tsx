@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import "./index.css";
+import * as tauri from "./lib/tauri";
+(window as any).tauri = tauri;
 
 type PageView = "dashboard" | "security" | "authenticator" | "activity" | "settings";
 
@@ -33,6 +35,68 @@ function App() {
   const [isDark, setIsDark] = useState(true);
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
 
+  // Setup auto-lock idle timeout and focus lost event listeners
+        useEffect(() => {
+          if (isLocked) return;
+  
+          let idleTimer: number;
+  
+          const resetIdleTimer = () => {
+            if (idleTimer) window.clearTimeout(idleTimer);
+            // Fetch fresh settings state
+            const { idleTimeout } = useVaultStore.getState();
+  
+            idleTimer = window.setTimeout(() => {
+              console.log("Idle timeout reached. Locking vault...");
+              lock();
+            }, idleTimeout * 1000);
+          };
+  
+          // Attach event listeners for user activity
+          const events = ["mousemove", "keydown", "mousedown", "touchstart"];
+          events.forEach((evt) => window.addEventListener(evt, resetIdleTimer));
+  
+          // Initialize timer
+          resetIdleTimer();
+  
+          // Tauri Focus Loss event
+          let active = true;
+          let unlistenFocus: (() => void) | undefined;
+  
+          const initFocusListener = async () => {
+            try {
+              const { getCurrentWindow } = await import("@tauri-apps/api/window");
+              const appWindow = getCurrentWindow();
+              const unlisten = await appWindow.onFocusChanged(({ payload: focused }) => {
+                const { lockOnFocusLost } = useVaultStore.getState();
+                if (!focused && lockOnFocusLost) {
+                  console.log("Focus lost. Locking vault...");
+                  lock();
+                }
+              });
+              if (!active) {
+                unlisten();
+              } else {
+                unlistenFocus = unlisten;
+              }
+            } catch (err) {
+              console.error("Failed to set up focus listener:", err);
+            }
+          };
+  
+          initFocusListener();
+  
+          // Clean up listeners on lock or unmount
+          return () => {
+            active = false;
+            if (idleTimer) window.clearTimeout(idleTimer);
+            events.forEach((evt) => window.removeEventListener(evt, resetIdleTimer));
+            if (unlistenFocus) {
+              unlistenFocus();
+            }
+          };
+        }, [isLocked, lock]);
+  
   useEffect(() => {
     const initStore = async () => {
       await checkInitialization();

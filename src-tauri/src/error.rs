@@ -1,53 +1,54 @@
-    use serde::{Serialize, Serializer};
-    use thiserror::Error;
 
-    #[derive(Error, Debug)]
-    pub enum Error {
-        #[error("Database error: {0}")]
-        Database(#[from] sqlx::Error),
+use serde::{Serialize, Serializer};
+use thiserror::Error;
 
-        #[error("Crypto error: {0}")]
-        Crypto(String),
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
 
-        #[error("Argon2 error: {0}")]
-        Argon2(String),
+    #[error("Crypto error: {0}")]
+    Crypto(String),
 
-        #[error("IO error: {0}")]
-        Io(#[from] std::io::Error),
+    #[error("Argon2 error: {0}")]
+    Argon2(String),
 
-        #[error("Zeroize / Memory error: {0}")]
-        Memory(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 
-        #[error("Invalid master password")]
-        InvalidPassword,
+    #[error("Zeroize / Memory error: {0}")]
+    Memory(String),
 
-        #[error("Vault is locked")]
-        VaultLocked,
+    #[error("Invalid master password")]
+    InvalidPassword,
 
-        #[error("Vault is already unlocked")]
-        VaultAlreadyUnlocked,
+    #[error("Vault is locked")]
+    VaultLocked,
 
-        #[error("TOTP error: {0}")]
-        Totp(String),
+    #[error("Vault is already unlocked")]
+    VaultAlreadyUnlocked,
 
-        #[error("Breach detection error: {0}")]
-        Breach(String),
+    #[error("TOTP error: {0}")]
+    Totp(String),
 
-        #[error("Migration error: {0}")]
-        Migration(#[from] sqlx::migrate::MigrateError),
+    #[error("Breach detection error: {0}")]
+    Breach(String),
+
+    #[error("Migration error: {0}")]
+    Migration(#[from] sqlx::migrate::MigrateError),
+}
+
+// Convert the error into a serialized string for Tauri's IPC bridge
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
     }
+}
 
-    // Convert the error into a serialized string for Tauri's IPC bridge
-    impl Serialize for Error {
-        fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            serializer.serialize_str(&self.to_string())
-        }
-    }
+pub type Result<T> = std::result::Result<T, Error>;
 
-    pub type Result<T> = std::result::Result<T, Error>;
-
-  // Register this module in lib.rs by adding at the top:
-  //  pub mod error;
+// Register this module in lib.rs by adding at the top:
+//  pub mod error;

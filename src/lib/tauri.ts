@@ -1,45 +1,57 @@
+
 import { invoke } from "@tauri-apps/api/core";
-import { Vault, EntrySummary, DecryptedEntry, GeneratePasswordOptions } from "./types";
 
-export type { Vault, EntrySummary, DecryptedEntry, GeneratePasswordOptions };
+export interface Vault {
+  id: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+}
 
-/**
- * Unlocks the vault using the master password.
- * @param password - The master password string.
- * @returns A promise that resolves when the vault is unlocked.
- */
-export async function unlockVault(password: string): Promise<void> {
-  await invoke<void>("unlock_vault", { password });
+export interface EntrySummary {
+  id: string;
+  vault_id: string;
+  title: string;
+  username: string | null;
+  has_totp: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DecryptedEntry {
+  id: string;
+  vault_id: string;
+  title: string;
+  username: string | null;
+  password: string;
+  totp_secret: string | null;
+  created_at: number;
+  updated_at: number;
 }
 
 /**
- * Alias for unlockVault. Unlocks the vault using the master password.
- * @param password - The master password string.
- * @returns A promise that resolves when the vault is unlocked.
+ * Initializes the database on first-time setup with the master password.
+ */
+export async function createVault(password: string): Promise<void> {
+  await invoke<void>("create_vault", { password });
+}
+
+/**
+ * Unlocks the existing database using the master password.
  */
 export async function unlock(password: string): Promise<void> {
-  await unlockVault(password);
+  await invoke<void>("unlock", { password });
 }
 
 /**
  * Locks the vault, closing database pools and wiping keys.
- * @returns A promise that resolves when the vault is locked.
- */
-export async function lockVault(): Promise<void> {
-  await invoke<void>("lock_vault");
-}
-
-/**
- * Alias for lockVault. Locks the vault, closing database pools and wiping keys.
- * @returns A promise that resolves when the vault is locked.
  */
 export async function lock(): Promise<void> {
-  await lockVault();
+  await invoke<void>("lock");
 }
 
 /**
  * Checks whether the vault is locked.
- * @returns A promise that resolves to true if the vault is locked, false otherwise.
  */
 export async function isVaultLocked(): Promise<boolean> {
   return await invoke<boolean>("is_vault_locked");
@@ -47,24 +59,20 @@ export async function isVaultLocked(): Promise<boolean> {
 
 /**
  * Checks if the vault has been initialized (i.e. if the salt file exists).
- * @returns A promise that resolves to true if initialized, false otherwise.
  */
 export async function isVaultInitialized(): Promise<boolean> {
   return await invoke<boolean>("is_vault_initialized");
 }
 
 /**
- * Creates a new vault.
- * @param name - The name of the vault partition.
- * @returns A promise that resolves to the newly created Vault details.
+ * Creates a new vault partition inside the database.
  */
-export async function createVault(name: string): Promise<Vault> {
-  return await invoke<Vault>("create_vault", { name });
+export async function createVaultPartition(name: string): Promise<Vault> {
+  return await invoke<Vault>("create_vault_partition", { name });
 }
 
 /**
- * Lists all vaults.
- * @returns A promise that resolves to an array of all Vault partitions.
+ * Lists all vaults in the database.
  */
 export async function listVaults(): Promise<Vault[]> {
   return await invoke<Vault[]>("list_vaults");
@@ -72,8 +80,6 @@ export async function listVaults(): Promise<Vault[]> {
 
 /**
  * Deletes a vault and all its entries.
- * @param id - The unique ID of the vault partition to delete.
- * @returns A promise that resolves when the vault partition is deleted.
  */
 export async function deleteVault(id: string): Promise<void> {
   await invoke<void>("delete_vault", { id });
@@ -81,12 +87,6 @@ export async function deleteVault(id: string): Promise<void> {
 
 /**
  * Creates a new credential entry.
- * @param vaultId - The ID of the vault partition.
- * @param title - Title/label of the credential.
- * @param username - Optional username.
- * @param passwordPlaintext - Plaintext password.
- * @param totpSecretPlaintext - Optional raw TOTP secret.
- * @returns A promise that resolves to the summary of the created Entry.
  */
 export async function createEntry(
   vaultId: string,
@@ -105,28 +105,7 @@ export async function createEntry(
 }
 
 /**
- * Alias for createEntry. Creates a new credential entry.
- * @param vaultId - The ID of the vault partition.
- * @param title - Title/label of the credential.
- * @param username - Optional username.
- * @param passwordPlaintext - Plaintext password.
- * @param totpSecretPlaintext - Optional raw TOTP secret.
- * @returns A promise that resolves to the summary of the created Entry.
- */
-export async function addEntry(
-  vaultId: string,
-  title: string,
-  username: string | null,
-  passwordPlaintext: string,
-  totpSecretPlaintext: string | null
-): Promise<EntrySummary> {
-  return await createEntry(vaultId, title, username, passwordPlaintext, totpSecretPlaintext);
-}
-
-/**
  * Lists all entries in a specific vault.
- * @param vaultId - The ID of the vault partition to list entries from.
- * @returns A promise that resolves to an array of EntrySummaries.
  */
 export async function listEntries(vaultId: string): Promise<EntrySummary[]> {
   return await invoke<EntrySummary[]>("list_entries", { vaultId });
@@ -134,8 +113,6 @@ export async function listEntries(vaultId: string): Promise<EntrySummary[]> {
 
 /**
  * Retrieves and decrypts a specific entry.
- * @param id - The unique ID of the credential entry.
- * @returns A promise that resolves to the fully decrypted Entry.
  */
 export async function getEntry(id: string): Promise<DecryptedEntry> {
   return await invoke<DecryptedEntry>("get_entry", { id });
@@ -143,12 +120,6 @@ export async function getEntry(id: string): Promise<DecryptedEntry> {
 
 /**
  * Updates an entry's details.
- * @param id - The unique ID of the entry.
- * @param title - Updated title.
- * @param username - Updated optional username.
- * @param passwordPlaintext - Updated plaintext password.
- * @param totpSecretPlaintext - Updated optional raw TOTP secret.
- * @returns A promise that resolves when the update is complete.
  */
 export async function updateEntry(
   id: string,
@@ -168,80 +139,51 @@ export async function updateEntry(
 
 /**
  * Deletes an entry.
- * @param id - The unique ID of the entry to delete.
- * @returns A promise that resolves when the entry is deleted.
  */
 export async function deleteEntry(id: string): Promise<void> {
   await invoke<void>("delete_entry", { id });
 }
 
 /**
- * Retrieves and decrypts the password for a specific entry.
- * @param id - The unique ID of the credential entry.
- * @returns A promise that resolves to the plaintext password string.
+ * Retrieves a setting from the database.
  */
-export async function decryptPassword(id: string): Promise<string> {
-  const entry = await getEntry(id);
-  return entry.password;
+export async function getSetting(key: string): Promise<string> {
+  return await invoke<string>("get_setting", { key });
 }
 
 /**
- * Generates a random secure password on the client side based on configuration options.
- * @param options - Parameters configuring length and charset character types.
- * @returns A promise that resolves to the generated password string.
+ * Updates or inserts a setting in the database.
  */
-export async function generatePassword(options: GeneratePasswordOptions): Promise<string> {
-  let charset = "";
-  if (options.useUpper ?? true) charset += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  if (options.useLower ?? true) charset += "abcdefghijklmnopqrstuvwxyz";
-  if (options.useNumbers ?? true) charset += "0123456789";
-  if (options.useSymbols ?? true) charset += "!@#$%^&*()_+-=[]{}|;:,.<>?";
-  
-  if (!charset) return "";
-  
-  const arr = [];
-  const rnd = new Uint32Array(options.length);
-  window.crypto.getRandomValues(rnd);
-  for (let i = 0; i < options.length; i++) {
-    arr.push(charset[rnd[i] % charset.length]);
-  }
-  return arr.join("");
+export async function setSetting(key: string, value: string): Promise<void> {
+  await invoke<void>("set_setting", { key, value });
+}
+
+export interface TotpResponse {
+  code: string;
+  seconds_remaining: number;
 }
 
 /**
- * Calculates the current 6-digit TOTP code for a given TOTP secret string.
- * @param secret - The base32-like TOTP secret string.
- * @returns A promise that resolves to the current 6-digit TOTP code string.
+ * Retrieves the current TOTP code and remaining seconds for a given entry ID.
  */
-export async function getTotpCode(secret: string): Promise<string> {
-  const timeWindow = Math.floor(Date.now() / 30000);
-  let hash = 0;
-  const combined = secret + timeWindow;
-  for (let i = 0; i < combined.length; i++) {
-    hash = (hash * 31 + combined.charCodeAt(i)) >>> 0;
-  }
-  return String(hash % 1000000).padStart(6, "0");
+export async function getTotpCode(entryId: string): Promise<TotpResponse> {
+  return await invoke<TotpResponse>("get_totp_code", { entryId });
 }
 
-/**
- * Checks if a password has been seen in known common password data leaks.
- * @param password - The password string to check.
- * @returns A promise that resolves to true if commonly breached, false otherwise.
- */
-export async function checkBreach(password: string): Promise<boolean> {
-  const commonBreached = ["password", "password123", "123456", "admin", "12345678", "qwerty"];
-  return commonBreached.includes(password.toLowerCase());
+export interface CaptureSource {
+  id: string;
+  name: string;
+  source_type: "screen" | "window";
+  app_name: string | null;
+  title: string | null;
+  width: number;
+  height: number;
 }
 
-/**
- * Copies a string of text to the system clipboard securely.
- * @param text - The text content to copy.
- * @returns A promise that resolves when clipboard copy operation is finished.
- */
-export async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard) {
-    await navigator.clipboard.writeText(text);
-  } else {
-    throw new Error("Clipboard API not available");
-  }
+export async function listCaptureSources(): Promise<CaptureSource[]> {
+  return await invoke<CaptureSource[]>("list_capture_sources");
+}
+
+export async function captureSource(id: string): Promise<string> {
+  return await invoke<string>("capture_source", { id });
 }

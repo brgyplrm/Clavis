@@ -8,6 +8,27 @@ import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import { StrengthBar } from "./Setup";
 import { scorePassword } from "../lib/passwordStrength";
+import { useVaultStore } from "../hooks/useVaultStore";
+
+const timeoutToSeconds = (val: string): number => {
+  switch (val) {
+    case "1 min": return 60;
+    case "5 min": return 300;
+    case "15 min": return 900;
+    case "30 min": return 1800;
+    default: return 0; // Never
+  }
+};
+
+const secondsToTimeout = (seconds: number): string => {
+  switch (seconds) {
+    case 60: return "1 min";
+    case 300: return "5 min";
+    case 900: return "15 min";
+    case 1800: return "30 min";
+    default: return "Never";
+  }
+};
 
 const TABS = [
   { id: "general", label: "General", icon: SettingsIcon },
@@ -21,15 +42,15 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState("general");
   const [changePwOpen, setChangePwOpen] = useState(false);
 
+  // Bind settings from the real Zustand database store
+  const { idleTimeout, lockOnFocusLost, updateSetting } = useVaultStore();
+
   // General States
-  const [autoLockTime, setAutoLockTime] = useState("Never");
   const [clipboardDelay, setClipboardDelay] = useState("30s");
   const [theme, setTheme] = useState("Dark");
 
   // Security States
   const [lockOnScreenLock, setLockOnScreenLock] = useState(true);
-  const [lockOnIdle, setLockOnIdle] = useState(true);
-  const [lockOnIdleTime, setLockOnIdleTime] = useState("5 min");
   const [lockOnExtDisconnect, setLockOnExtDisconnect] = useState(true);
   const [autotypeDelay, setAutotypeDelay] = useState("3s");
   
@@ -109,8 +130,11 @@ export default function Settings() {
                     <span className="text-[10px] text-muted-foreground">Automatically lock vault when inactive</span>
                   </div>
                   <select
-                    value={autoLockTime}
-                    onChange={e => setAutoLockTime(e.target.value)}
+                    value={secondsToTimeout(idleTimeout)}
+                    onChange={async e => {
+                      const secs = timeoutToSeconds(e.target.value);
+                      await updateSetting("idle_timeout", secs.toString());
+                    }}
                     className="h-8 rounded-lg border border-border bg-background px-2.5 text-xs focus:outline-none"
                   >
                     <option value="1 min">1 min</option>
@@ -233,10 +257,13 @@ export default function Settings() {
                     <span className="text-[10px] text-muted-foreground">Lock vault after user inactivity timeout</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {lockOnIdle && (
+                    {idleTimeout > 0 && (
                       <select
-                        value={lockOnIdleTime}
-                        onChange={e => setLockOnIdleTime(e.target.value)}
+                        value={secondsToTimeout(idleTimeout)}
+                        onChange={async e => {
+                          const secs = timeoutToSeconds(e.target.value);
+                          await updateSetting("idle_timeout", secs.toString());
+                        }}
                         className="h-8 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none"
                       >
                         <option value="1 min">1 min</option>
@@ -247,11 +274,30 @@ export default function Settings() {
                     )}
                     <input
                       type="checkbox"
-                      checked={lockOnIdle}
-                      onChange={(e) => setLockOnIdle(e.target.checked)}
+                      checked={idleTimeout > 0}
+                      onChange={async (e) => {
+                        const val = e.target.checked ? "300" : "0";
+                        await updateSetting("idle_timeout", val);
+                      }}
                       className="h-4 w-4 text-purple rounded border-border focus:ring-purple cursor-pointer"
                     />
                   </div>
+                </div>
+
+                {/* Lock on app focus lost */}
+                <div className="flex items-center justify-between p-4 text-xs">
+                  <div>
+                    <span className="font-semibold block">Lock on focus lost</span>
+                    <span className="text-[10px] text-muted-foreground">Lock vault when the application loses window focus</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={lockOnFocusLost}
+                    onChange={async (e) => {
+                      await updateSetting("lock_on_focus_lost", e.target.checked ? "true" : "false");
+                    }}
+                    className="h-4 w-4 text-purple rounded border-border focus:ring-purple cursor-pointer"
+                  />
                 </div>
 
                 {/* Lock when extension disconnects toggle */}
