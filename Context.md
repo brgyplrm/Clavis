@@ -72,6 +72,21 @@ Only the crates listed above may make outbound network calls. No other crate is 
 
 **CI** — run cargo audit and cargo deny check on every push. Never merge code with unresolved audit findings.
 
+Quick unlock methods (PIN, fingerprint) are 
+shortcuts only — they never replace the master 
+password as the root of key derivation. Quick 
+unlock is only available after at least one 
+successful master password unlock per app 
+session. A full restart always requires the 
+master password. The derived vault key is held 
+in a zeroize-protected wrapper and is wiped on 
+full lock. Biometric authentication is handled 
+entirely by the OS (Windows Hello / Touch ID) 
+via Tauri plugins — no biometric data ever 
+touches PassVault's code or database. PIN 
+attempts are limited to 5 before falling back 
+to master password only.
+
 ---
 
 ## Project structure

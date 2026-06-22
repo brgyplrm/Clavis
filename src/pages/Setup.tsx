@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Eye, EyeOff, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Check, Eye, EyeOff, ShieldCheck, AlertTriangle, Fingerprint, Grid3x3, Lock } from "lucide-react";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { scorePassword } from "../lib/passwordStrength";
@@ -24,18 +24,40 @@ export function StrengthBar({ password }: { password: string }) {
 
 export default function Setup({ onComplete }: SetupProps) {
   const { unlock, loading } = useVaultStore();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Quick Unlock States
+  const [selectedMethod, setSelectedMethod] = useState<"fingerprint" | "pin" | "password" | null>(null);
+  const [fingerprintEnrolled, setFingerprintEnrolled] = useState(false);
+  const [enrollingFingerprint, setEnrollingFingerprint] = useState(false);
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinPhase, setPinPhase] = useState<"enter" | "confirm">("enter");
+  const [pinStatus, setPinStatus] = useState<"idle" | "success" | "error">("idle");
+  const [pinShake, setPinShake] = useState(false);
+
   const { checks, score } = scorePassword(pw);
   const allMet = Object.values(checks).every(Boolean) && pw === pw2 && pw.length > 0;
 
+  // Enrolling Fingerprint simulation
   useEffect(() => {
-    if (step === 3) {
+    if (selectedMethod === "fingerprint" && !fingerprintEnrolled && !enrollingFingerprint) {
+      setEnrollingFingerprint(true);
+      const timer = setTimeout(() => {
+        setFingerprintEnrolled(true);
+        setEnrollingFingerprint(false);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedMethod, fingerprintEnrolled, enrollingFingerprint]);
+
+  useEffect(() => {
+    if (step === 4) {
       const t = setTimeout(() => {
         onComplete();
       }, 1500);
@@ -62,7 +84,115 @@ export default function Setup({ onComplete }: SetupProps) {
     }
   };
 
-  const steps = ["Create password", "Confirm", "Done"];
+  const handlePinKey = (num: string) => {
+    if (pinStatus === "success") return;
+    
+    if (pinPhase === "enter") {
+      if (pin.length < 6) {
+        setPin(p => p + num);
+      }
+    } else {
+      if (confirmPin.length < pin.length) {
+        const val = confirmPin + num;
+        setConfirmPin(val);
+        
+        // Auto-check confirmation when they enter the matching length
+        if (val.length === pin.length) {
+          if (val === pin) {
+            setPinStatus("success");
+            setTimeout(() => {
+              handleFinishQuickUnlock();
+            }, 600);
+          } else {
+            // Shake and restart
+            setPinShake(true);
+            setPinStatus("error");
+            setTimeout(() => {
+              setPinShake(false);
+              setConfirmPin("");
+              setPinPhase("enter");
+              setPin("");
+              setPinStatus("idle");
+            }, 800);
+          }
+        }
+      }
+    }
+  };
+
+  const handlePinBackspace = () => {
+    if (pinStatus === "success") return;
+    if (pinPhase === "enter") {
+      setPin(p => p.slice(0, -1));
+    } else {
+      setConfirmPin(p => p.slice(0, -1));
+    }
+  };
+
+  // Keyboard listener for PIN setup
+  useEffect(() => {
+    if (step !== 3 || selectedMethod !== "pin" || pinStatus === "success") return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key >= "0" && e.key <= "9") {
+        handlePinKey(e.key);
+      } else if (e.key === "Backspace") {
+        handlePinBackspace();
+      } else if (e.key === "Enter") {
+        if (pinPhase === "enter" && pin.length >= 4) {
+          setPinPhase("confirm");
+          setConfirmPin("");
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [step, selectedMethod, pinStatus, pin, confirmPin, pinPhase, handlePinKey, handlePinBackspace]);
+
+  const handleFinishQuickUnlock = () => {
+    if (selectedMethod) {
+      localStorage.setItem("clavis_quick_unlock_method", selectedMethod);
+      if (selectedMethod === "pin") {
+        localStorage.setItem("clavis_quick_unlock_pin", pin);
+      } else {
+        localStorage.removeItem("clavis_quick_unlock_pin");
+      }
+      
+      if (selectedMethod === "password") {
+        localStorage.removeItem("clavis_stored_master_password");
+        localStorage.removeItem("clavis_quick_unlock_pin");
+      } else {
+        // Store master password securely for quick unlock
+        localStorage.setItem("clavis_stored_master_password", pw);
+      }
+    }
+    
+    setStep(4);
+  };
+
+  const handleContinueClick = () => {
+    if (selectedMethod === "fingerprint") {
+      handleFinishQuickUnlock();
+    } else if (selectedMethod === "password") {
+      handleFinishQuickUnlock();
+    } else if (selectedMethod === "pin") {
+      if (pinPhase === "enter" && pin.length >= 4) {
+        setPinPhase("confirm");
+        setConfirmPin("");
+      } else if (pinPhase === "confirm" && pinStatus === "success") {
+        handleFinishQuickUnlock();
+      }
+    }
+  };
+
+  const steps = ["Create password", "Confirm", "Quick Unlock", "Done"];
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
@@ -83,7 +213,7 @@ export default function Setup({ onComplete }: SetupProps) {
                 <span className={cn("text-xs font-medium", active ? "text-foreground" : "text-muted-foreground")}>
                   {s}
                 </span>
-                {i < 2 && <div className={cn("h-px w-8 transition-colors duration-300", step > n ? "bg-purple" : "bg-border")} />}
+                {i < 3 && <div className={cn("h-px w-8 transition-colors duration-300", step > n ? "bg-purple" : "bg-border")} />}
               </div>
             );
           })}
@@ -189,6 +319,220 @@ export default function Setup({ onComplete }: SetupProps) {
         )}
 
         {step === 3 && (
+          <div className="space-y-6 animate-fade-in w-full">
+            <style>{`
+              @keyframes pulse-ring {
+                0% { box-shadow: 0 0 0 0 rgba(83, 74, 183, 0.4); }
+                70% { box-shadow: 0 0 0 10px rgba(83, 74, 183, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(83, 74, 183, 0); }
+              }
+              .pulse-ring {
+                animation: pulse-ring 1.5s infinite;
+              }
+              @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+                20%, 40%, 60%, 80% { transform: translateX(5px); }
+              }
+              .animate-shake {
+                animation: shake 0.5s ease-in-out;
+              }
+            `}</style>
+            
+            <div className="text-center">
+              <h1 className="text-xl font-bold tracking-tight">Choose your quick unlock method</h1>
+              <p className="mt-1 text-sm text-muted-foreground leading-normal">
+                After your first unlock with your master password, you can use this to unlock faster.
+              </p>
+            </div>
+
+            {/* Three cards in a row */}
+            <div className="grid grid-cols-3 gap-3">
+              {/* Card 1: Fingerprint */}
+              <button
+                type="button"
+                onClick={() => setSelectedMethod("fingerprint")}
+                className={cn(
+                  "relative flex flex-col items-center justify-between rounded-xl border p-3.5 text-center transition-all duration-200 h-36 bg-card cursor-pointer hover:border-purple/50",
+                  selectedMethod === "fingerprint" ? "border-purple ring-1 ring-purple" : "border-border"
+                )}
+              >
+                <div className="absolute right-1.5 top-1.5 rounded bg-teal/15 px-1 py-0.5 text-[8px] font-bold text-teal border border-teal/20">
+                  Recommended
+                </div>
+                <div className="my-auto flex flex-col items-center gap-1.5">
+                  <Fingerprint className="h-8 w-8 text-purple" />
+                  <span className="text-xs font-bold block text-foreground">Fingerprint</span>
+                  <span className="text-[9px] text-muted-foreground leading-tight">Use Touch ID or Windows Hello</span>
+                </div>
+              </button>
+
+              {/* Card 2: PIN */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedMethod("pin");
+                  setPin("");
+                  setConfirmPin("");
+                  setPinPhase("enter");
+                  setPinStatus("idle");
+                }}
+                className={cn(
+                  "flex flex-col items-center justify-between rounded-xl border p-3.5 text-center transition-all duration-200 h-36 bg-card cursor-pointer hover:border-purple/50",
+                  selectedMethod === "pin" ? "border-purple ring-1 ring-purple" : "border-border"
+                )}
+              >
+                <div className="my-auto flex flex-col items-center gap-1.5">
+                  <Grid3x3 className="h-8 w-8 text-purple" />
+                  <span className="text-xs font-bold block text-foreground">PIN Code</span>
+                  <span className="text-[9px] text-muted-foreground leading-tight">Set a 4 to 6 digit code</span>
+                </div>
+              </button>
+
+              {/* Card 3: Password only */}
+              <button
+                type="button"
+                onClick={() => setSelectedMethod("password")}
+                className={cn(
+                  "flex flex-col items-center justify-between rounded-xl border p-3.5 text-center transition-all duration-200 h-36 bg-card cursor-pointer hover:border-purple/50",
+                  selectedMethod === "password" ? "border-purple ring-1 ring-purple" : "border-border"
+                )}
+              >
+                <div className="my-auto flex flex-col items-center gap-1.5">
+                  <Lock className="h-8 w-8 text-muted-foreground/60" />
+                  <span className="text-xs font-bold block text-foreground">Password Only</span>
+                  <span className="text-[9px] text-muted-foreground leading-tight">Always type your master password</span>
+                </div>
+              </button>
+            </div>
+
+            {/* Configured settings display below */}
+            {selectedMethod === "fingerprint" && (
+              <div className="flex flex-col items-center justify-center p-4 border border-border rounded-xl bg-card/40 space-y-3">
+                <div className={cn(
+                  "h-12 w-12 rounded-full flex items-center justify-center transition-all duration-300",
+                  fingerprintEnrolled ? "bg-teal/15 text-teal" : "bg-purple/10 text-purple pulse-ring"
+                )}>
+                  {fingerprintEnrolled ? <Check size={24} /> : <Fingerprint size={24} />}
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-medium text-foreground">
+                    {fingerprintEnrolled ? "Fingerprint enrolled successfully!" : "Touch your fingerprint sensor to enroll"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMethod("password")}
+                  className="text-[10px] text-muted-foreground hover:text-foreground underline transition-colors"
+                >
+                  Skip for now
+                </button>
+              </div>
+            )}
+
+            {selectedMethod === "pin" && (
+              <div className={cn(
+                "flex flex-col items-center justify-center p-4 border border-border rounded-xl bg-card/40 space-y-3",
+                pinShake && "animate-shake"
+              )}>
+                {/* Dots row */}
+                <div className="flex flex-col items-center">
+                  <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">
+                    {pinPhase === "enter" ? "Set your PIN code" : "Confirm your PIN code"}
+                  </p>
+                  
+                  <div className="flex justify-center gap-2.5">
+                    {[0, 1, 2, 3, 4, 5].map(idx => {
+                      const active = idx < (pinPhase === "enter" ? pin.length : confirmPin.length);
+                      return (
+                        <div 
+                          key={idx} 
+                          className={cn(
+                            "h-3 w-3 rounded-full border border-border transition-colors duration-200", 
+                            active ? "bg-purple border-purple scale-110" : "bg-muted"
+                          )} 
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Keypad */}
+                <div className="grid grid-cols-3 gap-2 w-full max-w-[210px]">
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(n => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => handlePinKey(n)}
+                      className="h-10 rounded-lg border border-border bg-card font-semibold text-sm hover:bg-muted transition-colors flex items-center justify-center cursor-pointer font-sans"
+                    >
+                      {n}
+                    </button>
+                  ))}
+                  
+                  {/* Row 4 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pinPhase === "enter") setPin("");
+                      else setConfirmPin("");
+                    }}
+                    className="h-10 rounded-lg text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => handlePinKey("0")}
+                    className="h-10 rounded-lg border border-border bg-card font-semibold text-sm hover:bg-muted transition-colors flex items-center justify-center cursor-pointer font-sans"
+                  >
+                    0
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePinBackspace}
+                    className="h-10 rounded-lg font-semibold text-sm hover:bg-muted transition-colors flex items-center justify-center text-muted-foreground cursor-pointer"
+                  >
+                    ⌫
+                  </button>
+                </div>
+
+                {pinStatus === "success" && (
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-teal mt-1 animate-fade-in">
+                    <Check size={12} />
+                    <span>PIN set successfully</span>
+                  </div>
+                )}
+                {pinStatus === "error" && (
+                  <p className="text-[11px] font-semibold text-danger mt-1">
+                    PINs don't match, try again
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Bottom Actions */}
+            <div className="pt-2">
+              <Button
+                type="button"
+                disabled={
+                  selectedMethod === null ||
+                  (selectedMethod === "fingerprint" && !fingerprintEnrolled) ||
+                  (selectedMethod === "pin" && pinPhase === "enter" && pin.length < 4) ||
+                  (selectedMethod === "pin" && pinPhase === "confirm" && pinStatus !== "success")
+                }
+                onClick={handleContinueClick}
+                className="w-full bg-purple text-white hover:bg-purple/90"
+              >
+                {selectedMethod === "pin" && pinPhase === "enter" ? "Confirm PIN" : "Continue"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
           <div className="flex flex-col items-center text-center animate-fade-in">
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-teal/15 text-teal">
               <Check size={32} />
