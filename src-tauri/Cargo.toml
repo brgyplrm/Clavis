@@ -32,14 +32,18 @@ aes-gcm = "0.10"
 ring = "0.17"
 zeroize = { version = "1", features = ["derive"] }
 totp-rs = { version = "5", features = ["gen_secret"] }
+arboard = "3.4.0"
 xcap = "0.9.6"
 base64 = "0.22.1"
 image = "0.25.1"
 tokio-tungstenite = "0.21"
+# Approved strictly for the HaveIBeenPwned (HIBP) checker module (E4-10)
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+# Approved strictly for the HaveIBeenPwned (HIBP) checker module (E4-10)
 sha1 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "1"
 anyhow = "1"
 secrecy = { version = "0.8", features = ["serde"] }
+futures-util = "0.3"
 

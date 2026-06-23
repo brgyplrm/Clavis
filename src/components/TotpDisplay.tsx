@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getTotpCode } from "../lib/tauri";
+import { getTotpCode, copyToClipboard } from "../lib/tauri";
+import { useVaultStore } from "../hooks/useVaultStore";
 import { Copy, Check, AlertCircle } from "lucide-react";
 
 interface TotpDisplayProps {
@@ -46,7 +47,8 @@ export default function TotpDisplay({ entryId }: TotpDisplayProps) {
   const handleCopy = async () => {
     if (!code) return;
     try {
-      await navigator.clipboard.writeText(code);
+      await copyToClipboard(code);
+      useVaultStore.getState().startClipboardCountdown();
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {

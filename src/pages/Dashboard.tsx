@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useVaultStore } from "../hooks/useVaultStore";
-import { getEntry, DecryptedEntry, EntrySummary } from "../lib/tauri";
+import { getEntry, DecryptedEntry, EntrySummary, copyToClipboard, checkPasswordBreached, getCachedBreaches, updateBreachesCache, Breach } from "../lib/tauri";
 import { logEvent } from "../lib/activity";
 import TotpDisplay from "../components/TotpDisplay";
+import PasswordGeneratorModal from "../components/PasswordGeneratorModal";
 import { 
   Plus, Trash2, Search, Copy, Eye, EyeOff, 
   Edit, X, AlertTriangle, QrCode, Check,
-  Tag, Filter, Paperclip, FileText, Download, Upload, Keyboard, RefreshCw, Globe,
+  Tag, Filter, Paperclip, FileText, Download, Upload, Keyboard, Globe,
   ShieldCheck
 } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -106,7 +107,40 @@ export function initials(name: string) {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+function extractDomain(urlOrTitle: string): string {
+  if (!urlOrTitle) return "";
+  try {
+    let cleanUrl = urlOrTitle.trim();
+    if (!/^https?:\/\//i.test(cleanUrl)) {
+      cleanUrl = "https://" + cleanUrl;
+    }
+    const parsed = new URL(cleanUrl);
+    let host = parsed.hostname.toLowerCase();
+    if (host.startsWith("www.")) {
+      host = host.substring(4);
+    }
+    return host;
+  } catch (e) {
+    let host = urlOrTitle.trim().toLowerCase();
+    host = host.replace(/\s+/g, "");
+    return host;
+  }
+}
 
+function findDomainBreach(domain: string, breaches: any[]): any | null {
+  if (!domain || !breaches || breaches.length === 0) return null;
+  return breaches.find((b) => {
+    if (!b.Domain) return false;
+    const bDomain = b.Domain.toLowerCase();
+    return (
+      domain === bDomain ||
+      domain.endsWith("." + bDomain) ||
+      bDomain.endsWith("." + domain) ||
+      (domain.length > 3 && bDomain.includes(domain)) ||
+      (bDomain.length > 3 && domain.includes(bDomain))
+    );
+  }) || null;
+}
 
 export default function Dashboard() {
   const {
@@ -183,6 +217,91 @@ export default function Dashboard() {
   // Attachments State (held dynamically per entry)
   const [attachmentsList, setAttachmentsList] = useState<{ name: string; size: number }[]>([]);
 
+  // HaveIBeenPwned Breach Checker states
+  const [breachCount, setBreachCount] = useState<number | null>(null);
+  const [breachChecking, setBreachChecking] = useState(false);
+  const [breachFailed, setBreachFailed] = useState(false);
+
+  // Cache list of all global breaches
+  const [breachesList, setBreachesList] = useState<Breach[]>([]);
+
+  // Load and refresh HaveIBeenPwned breaches cache on mount
+  useEffect(() => {
+    const initBreaches = async () => {
+      try {
+        const cached = await getCachedBreaches();
+        if (cached) {
+          try {
+            setBreachesList(JSON.parse(cached));
+          } catch (e) {
+            console.error("Failed to parse cached breaches", e);
+          }
+        }
+        // Background refresh from HIBP API (won't block UI)
+        const updated = await updateBreachesCache();
+        if (updated) {
+          setBreachesList(JSON.parse(updated));
+        }
+      } catch (err) {
+        console.error("Failed to initialize domain breaches list", err);
+      }
+    };
+    initBreaches();
+  }, []);
+
+  // Compute if the currently selected domain is breached
+  const activeDomainBreach = useMemo(() => {
+    if (!decryptedEntry || breachesList.length === 0) return null;
+    const url = getEntryUrl(decryptedEntry.id);
+    const domain = extractDomain(url || decryptedEntry.title);
+    const breach = findDomainBreach(domain, breachesList);
+    if (!breach) return null;
+
+    // Check if the password was last updated before the breach Date
+    const breachTime = new Date(breach.BreachDate).getTime() / 1000;
+    if (decryptedEntry.updated_at < breachTime) {
+      return breach;
+    }
+    return null;
+  }, [decryptedEntry, breachesList]);
+
+  useEffect(() => {
+    if (!decryptedEntry?.password) {
+      setBreachCount(null);
+      setBreachChecking(false);
+      setBreachFailed(false);
+      return;
+    }
+
+    let active = true;
+    const runBreachCheck = async () => {
+      setBreachChecking(true);
+      setBreachFailed(false);
+      setBreachCount(null);
+      try {
+        const res = await checkPasswordBreached(decryptedEntry.password);
+        if (active) {
+          setBreachCount(res.count);
+        }
+      } catch (err) {
+        console.error("HIBP check error:", err);
+        if (active) {
+          setBreachFailed(true);
+        }
+      } finally {
+        if (active) {
+          setBreachChecking(false);
+        }
+      }
+    };
+
+    runBreachCheck();
+
+    return () => {
+      active = false;
+    };
+  }, [decryptedEntry?.id, decryptedEntry?.password]);
+
   // Modals state
   const [addEntryOpen, setAddEntryOpen] = useState(false);
   const [editEntryOpen, setEditEntryOpen] = useState(false);
@@ -203,16 +322,6 @@ export default function Dashboard() {
   const [formTags, setFormTags] = useState("");
   const [formAttachments, setFormAttachments] = useState<{ name: string; size: number }[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
-
-  // Password Generator State
-  const [genLength, setGenLength] = useState(20);
-  const [genUpper, setGenUpper] = useState(true);
-  const [genLower, setGenLower] = useState(true);
-  const [genNumbers, setGenNumbers] = useState(true);
-  const [genSymbols, setGenSymbols] = useState(true);
-  const [genExcludeAmbiguous, setGenExcludeAmbiguous] = useState(false);
-  const [genRequireEach, setGenRequireEach] = useState(true);
-  const [generatedPassword, setGeneratedPassword] = useState("");
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: EntrySummary } | null>(null);
@@ -284,6 +393,20 @@ export default function Dashboard() {
   const evaluateEntryStatus = (entryId: string): "safe" | "weak" | "reused" | "breached" => {
     const breached = JSON.parse(localStorage.getItem("clavis_password_breached") || "{}");
     if (breached[entryId]) return "breached";
+
+    // Also check if domain is breached
+    const entry = entries.find(e => e.id === entryId);
+    if (entry && breachesList.length > 0) {
+      const url = getEntryUrl(entryId);
+      const domain = extractDomain(url || entry.title);
+      const breach = findDomainBreach(domain, breachesList);
+      if (breach) {
+        const breachTime = new Date(breach.BreachDate).getTime() / 1000;
+        if (entry.updated_at < breachTime) {
+          return "breached";
+        }
+      }
+    }
 
     const scores = JSON.parse(localStorage.getItem("clavis_password_scores") || "{}");
     const score = scores[entryId] ?? 4;
@@ -388,8 +511,12 @@ export default function Dashboard() {
   }, [entries, customTags]);
 
   const handleCopyText = (text: string, title: string = "—", type: string = "Item") => {
-    navigator.clipboard?.writeText(text);
-    logEvent("Copied", title, type);
+    copyToClipboard(text).then(() => {
+      useVaultStore.getState().startClipboardCountdown();
+      logEvent("Copied", title, type);
+    }).catch(err => {
+      console.error("Failed to copy text:", err);
+    });
   };
 
   // Add Tag (FIX 1)
@@ -528,64 +655,7 @@ export default function Dashboard() {
 
   // Password Generator Actions
   const openPasswordGenerator = () => {
-    generateRandomPassword();
     setGeneratorOpen(true);
-  };
-
-  const generateRandomPassword = () => {
-    const upperChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const lowerChars = "abcdefghijklmnopqrstuvwxyz";
-    const numChars = "0123456789";
-    const symChars = "!@#$%^&*()-_=+[]{}|;:,./<>?";
-    const ambiguous = "Il1O0o";
-
-    let pool = "";
-    if (genUpper) pool += upperChars;
-    if (genLower) pool += lowerChars;
-    if (genNumbers) pool += numChars;
-    if (genSymbols) pool += symChars;
-    
-    if (genExcludeAmbiguous) {
-      pool = pool.split("").filter(c => !ambiguous.includes(c)).join("");
-    }
-
-    if (!pool) {
-      setGeneratedPassword("");
-      return;
-    }
-
-    let result = "";
-    // Guaranteed characters if required
-    if (genRequireEach) {
-      if (genUpper) result += upperChars[Math.floor(Math.random() * upperChars.length)];
-      if (genLower) result += lowerChars[Math.floor(Math.random() * lowerChars.length)];
-      if (genNumbers) result += numChars[Math.floor(Math.random() * numChars.length)];
-      if (genSymbols) result += symChars[Math.floor(Math.random() * symChars.length)];
-    }
-
-    while (result.length < genLength) {
-      result += pool[Math.floor(Math.random() * pool.length)];
-    }
-
-    // Shuffle characters
-    const arr = result.split("");
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    setGeneratedPassword(arr.join(""));
-  };
-
-  // Trigger regeneration on length/flags change
-  useEffect(() => {
-    if (generatorOpen) {
-      generateRandomPassword();
-    }
-  }, [genLength, genUpper, genLower, genNumbers, genSymbols, genExcludeAmbiguous, genRequireEach, generatorOpen]);
-
-  const handleUseGenerated = () => {
-    setFormPassword(generatedPassword);
-    setGeneratorOpen(false);
   };
 
   // Add dummy file attachments helper
@@ -1078,6 +1148,22 @@ export default function Dashboard() {
                     <div className="text-[10px] text-muted-foreground truncate max-w-full mt-0.5">{decryptedEntry.username || "No username"}</div>
                   </div>
 
+                  {/* Domain Breach Warning Banner */}
+                  {activeDomainBreach && (
+                    <div className="p-3 border border-amber-500/20 bg-amber-500/10 text-amber-300 rounded-lg text-[10px] space-y-1.5 flex flex-col items-start leading-relaxed animate-fadeIn">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                        <AlertTriangle size={12} className="shrink-0 text-amber-500" />
+                        <span>Security Alert: {activeDomainBreach.Title} Breach</span>
+                      </div>
+                      <p>
+                        This site suffered a breach on <strong>{new Date(activeDomainBreach.BreachDate).toLocaleDateString()}</strong> (exposing <em>{activeDomainBreach.DataClasses.join(", ")}</em>).
+                      </p>
+                      <p className="font-semibold text-amber-200">
+                        Your password has not been updated since then. We highly recommend changing it.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Username field */}
                   <div className="space-y-1">
                     <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Username</div>
@@ -1098,7 +1184,29 @@ export default function Dashboard() {
 
                   {/* Password field */}
                   <div className="space-y-1">
-                    <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Password</div>
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground flex justify-between items-center">
+                      <span>Password</span>
+                      {/* HIBP Breach Badge */}
+                      {breachChecking ? (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground animate-pulse font-semibold">
+                          Checking breaches...
+                        </span>
+                      ) : breachFailed ? (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300 font-semibold flex items-center gap-1">
+                          <AlertTriangle size={8} /> Check failed
+                        </span>
+                      ) : breachCount !== null ? (
+                        breachCount > 0 ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-danger/15 text-danger font-semibold flex items-center gap-1 border border-danger/20">
+                            ⚠ Breached: {breachCount.toLocaleString()} times
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal/15 text-teal font-semibold flex items-center gap-1 border border-teal/20">
+                            ✓ Secure / Clean
+                          </span>
+                        )
+                      ) : null}
+                    </div>
                     <div className="flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs">
                       <span className={cn(
                         "flex-1 truncate font-mono",
@@ -1615,112 +1723,11 @@ export default function Dashboard() {
       )}
 
       {/* 3. Password Generator Dialog (Modal 2) */}
-      {generatorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl space-y-4 animate-fade-in text-foreground">
-            <div className="flex justify-between items-center border-b border-border pb-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Generate password</h2>
-              <button type="button" onClick={() => setGeneratorOpen(false)} className="text-muted-foreground hover:text-foreground">
-                <X size={14} />
-              </button>
-            </div>
-
-            {/* Read-only monospace output field with Copy + Regenerate */}
-            <div className="relative">
-              <input
-                type="text"
-                readOnly
-                value={generatedPassword}
-                className="w-full rounded-md border border-border bg-background p-2.5 pr-16 text-center font-mono text-sm tracking-wider outline-none"
-              />
-              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => handleCopyText(generatedPassword)}
-                  className="p-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <Copy size={13} />
-                </button>
-                <button
-                  type="button"
-                  onClick={generateRandomPassword}
-                  className="p-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <RefreshCw size={13} />
-                </button>
-              </div>
-            </div>
-
-            {/* Password strength bar + entropy label */}
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-              <div className="flex-1 mr-3">
-                <StrengthBar password={generatedPassword} />
-              </div>
-              <span className="font-semibold text-teal">
-                {Math.round(generatedPassword.length * 4.4)} bits — Strong
-              </span>
-            </div>
-
-            {/* Length Range Slider */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] font-bold text-muted-foreground uppercase">
-                <span>Length</span>
-                <span className="text-foreground">{genLength}</span>
-              </div>
-              <input
-                type="range"
-                min={8}
-                max={128}
-                value={genLength}
-                onChange={e => setGenLength(parseInt(e.target.value))}
-                className="w-full accent-purple cursor-pointer h-1 bg-border rounded-lg appearance-none"
-              />
-            </div>
-
-            {/* Checkboxes 2-col grid */}
-            <div className="grid grid-cols-2 gap-2.5 pt-1 text-[11px]">
-              <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground">
-                <input type="checkbox" checked={genUpper} onChange={e => setGenUpper(e.target.checked)} className="rounded text-purple" />
-                <span>Uppercase (A–Z)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground">
-                <input type="checkbox" checked={genLower} onChange={e => setGenLower(e.target.checked)} className="rounded text-purple" />
-                <span>Lowercase (a–z)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground">
-                <input type="checkbox" checked={genNumbers} onChange={e => setGenNumbers(e.target.checked)} className="rounded text-purple" />
-                <span>Numbers (0–9)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground">
-                <input type="checkbox" checked={genSymbols} onChange={e => setGenSymbols(e.target.checked)} className="rounded text-purple" />
-                <span>Symbols (!@#$)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground col-span-2">
-                <input type="checkbox" checked={genExcludeAmbiguous} onChange={e => setGenExcludeAmbiguous(e.target.checked)} className="rounded text-purple" />
-                <span>Exclude ambiguous characters</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground col-span-2">
-                <input type="checkbox" checked={genRequireEach} onChange={e => setGenRequireEach(e.target.checked)} className="rounded text-purple" />
-                <span>Require at least one of each</span>
-              </label>
-            </div>
-
-            {/* Footer */}
-            <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
-              <Button type="button" variant="outline" size="sm" onClick={() => setGeneratorOpen(false)} className="text-xs">
-                Cancel
-              </Button>
-              <Button 
-                type="button" 
-                onClick={handleUseGenerated}
-                className="text-xs bg-purple text-white hover:bg-purple/90 font-semibold"
-              >
-                Use this password
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PasswordGeneratorModal
+        isOpen={generatorOpen}
+        onClose={() => setGeneratorOpen(false)}
+        onApply={(password) => setFormPassword(password)}
+      />
 
       {/* 4. Autotype Countdown Dialog (Modal 3) */}
       {autotypeOpen && (

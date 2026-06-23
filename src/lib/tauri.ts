@@ -187,3 +187,68 @@ export async function listCaptureSources(): Promise<CaptureSource[]> {
 export async function captureSource(id: string): Promise<string> {
   return await invoke<string>("capture_source", { id });
 }
+
+/**
+ * Copies sensitive text to the system clipboard and schedules an automatic clear after 30 seconds.
+ */
+export async function copyToClipboard(text: string): Promise<void> {
+  await invoke<void>("copy_to_clipboard", { text });
+}
+
+export interface BreachCheckResponse {
+  count: number;
+}
+
+/**
+ * Checks a password against the HaveIBeenPwned API using k-anonymity.
+ */
+export async function checkPasswordBreached(password: string): Promise<BreachCheckResponse> {
+  return await invoke<BreachCheckResponse>("check_password_breached", { password });
+}
+
+export interface Breach {
+  Name: string;
+  Title: string;
+  Domain: string;
+  BreachDate: string;
+  AddedDate: string;
+  PwnCount: number;
+  Description: string;
+  DataClasses: string[];
+  LogoPath: string;
+}
+
+/**
+ * Retrieves the local cached data breaches list, if it exists.
+ */
+export async function getCachedBreaches(): Promise<string | null> {
+  return await invoke<string | null>("get_cached_breaches");
+}
+
+/**
+ * Fetches data breaches list from HaveIBeenPwned API and caches it locally.
+ */
+export async function updateBreachesCache(): Promise<string> {
+  return await invoke<string>("update_breaches_cache");
+}
+
+export interface PasswordGeneratorOptions {
+  length: number;
+  uppercase: boolean;
+  lowercase: boolean;
+  digits: boolean;
+  symbols: boolean;
+}
+
+/**
+ * Generates a random secure password using the Rust CSPRNG backend.
+ */
+export async function generatePassword(options: PasswordGeneratorOptions): Promise<string> {
+  return await invoke<string>("generate_password", {
+    length: options.length,
+    uppercase: options.uppercase,
+    lowercase: options.lowercase,
+    digits: options.digits,
+    symbols: options.symbols,
+  });
+}

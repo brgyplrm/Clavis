@@ -1,0 +1,29 @@
+{
+  "manifest_version": 2,
+  "name": "Clavis Browser Companion",
+  "version": "0.1.0",
+  "description": "Companion browser extension for the Clavis desktop password manager.",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["src/background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_action": {
+    "default_popup": "src/popup/popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "clavis@achyllisss.com"
+    }
+  }
+}

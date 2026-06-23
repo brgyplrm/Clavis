@@ -15,6 +15,10 @@ pub struct AppState {
     pub db: Mutex<Option<SqlitePool>>,
     /// Derived KDF session key stored securely.
     pub session_key: Mutex<Option<Zeroizing<[u8; 32]>>>,
+    /// Global counter representing the current clipboard write sequence to handle concurrent auto-clears.
+    pub clipboard_epoch: Mutex<u64>,
+    /// WebSocket session token.
+    pub ws_token: String,
 }
 
 /// Helper function to retrieve the database pool from AppState.

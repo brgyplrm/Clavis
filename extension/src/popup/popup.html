@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clavis Companion</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🗝️</span>
+        <span class="logo-text">Clavis</span>
+      </div>
+      <div id="status-badge" class="status-badge locked">Locked</div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Locked Screen -->
+      <div id="locked-view" class="view">
+        <div class="lock-illustration">🔒</div>
+        <p class="lock-message">Open the Clavis desktop application and unlock your vault to access credentials.</p>
+      </div>
+
+      <!-- Unlocked Screen -->
+      <div id="unlocked-view" class="view hidden">
+        <!-- Search bar -->
+        <div class="search-box">
+          <input type="text" id="search-input" placeholder="Search entries..." autocomplete="off">
+          <span class="search-icon">🔍</span>
+        </div>
+
+        <!-- Entries List -->
+        <div class="entries-list-container">
+          <ul id="entries-list" class="entries-list">
+            <!-- Dynamic list goes here -->
+          </ul>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

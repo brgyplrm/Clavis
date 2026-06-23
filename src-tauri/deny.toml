@@ -61,6 +61,8 @@ allow = [
     "MPL-2.0",
     "Unicode-3.0",
     "Apache-2.0 WITH LLVM-exception",
+    "BSL-1.0",
+    "NCSA",
 ]
 [bans]
 # Warn if duplicate versions of the same crate are pulled into the build

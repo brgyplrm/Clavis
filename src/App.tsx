@@ -24,6 +24,8 @@ function App() {
     checkInitialization,
     checkLockStatus,
     lock,
+    clipboardCountdown,
+    clearClipboardCountdown,
   } = useVaultStore();
 
   const [checking, setChecking] = useState(true);
@@ -239,6 +241,29 @@ function App() {
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 min-w-0 h-screen relative">
         {renderViewContent()}
+
+        {/* Global Clipboard Auto-Clear Indicator */}
+        {clipboardCountdown !== null && (
+          <div className="absolute bottom-4 right-4 z-40 bg-zinc-900 border border-purple/30 text-white rounded-lg shadow-lg py-2.5 px-4 flex items-center gap-3 animate-fade-in text-xs font-medium">
+            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-purple/20 text-purple">
+              <ScrollText size={12} className="animate-pulse" />
+            </div>
+            <span>Clipboard clears in <strong className="text-purple font-bold">{clipboardCountdown}s</strong></span>
+            <button
+              onClick={async () => {
+                try {
+                  await tauri.copyToClipboard("");
+                  clearClipboardCountdown();
+                } catch (err) {
+                  console.error("Failed to clear clipboard", err);
+                }
+              }}
+              className="text-[10px] text-muted-foreground hover:text-white px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 transition-colors ml-1 cursor-pointer"
+            >
+              Clear Now
+            </button>
+          </div>
+        )}
       </main>
 
       {/* LOCK VAULT CONFIRMATION DIALOG (Modal 5) */}

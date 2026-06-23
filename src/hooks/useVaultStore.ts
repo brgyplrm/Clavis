@@ -1,4 +1,6 @@
     import { create } from "zustand";
+
+let globalClipboardInterval: any = null;
     import {
       Vault,
       EntrySummary,
@@ -28,6 +30,9 @@
       error: string | null;
       idleTimeout: number; // Stored idle time (in seconds)
       lockOnFocusLost: boolean; // Focus-loss lock flag
+      clipboardCountdown: number | null;
+      startClipboardCountdown: () => void;
+      clearClipboardCountdown: () => void;
 
       checkInitialization: () => Promise<void>;
       checkLockStatus: () => Promise<void>;
@@ -67,6 +72,7 @@
       error: null,
       idleTimeout: 300, // Default 5 minutes
       lockOnFocusLost: false, // Default off
+      clipboardCountdown: null,
 
       checkInitialization: async () => {
         try {
@@ -272,5 +278,30 @@
           set({ error: err.toString() });
           throw err;
         }
+      },
+
+      startClipboardCountdown: () => {
+        if (globalClipboardInterval) {
+          clearInterval(globalClipboardInterval);
+        }
+        set({ clipboardCountdown: 30 });
+        globalClipboardInterval = setInterval(() => {
+          const count = get().clipboardCountdown;
+          if (count === null || count <= 1) {
+            clearInterval(globalClipboardInterval);
+            globalClipboardInterval = null;
+            set({ clipboardCountdown: null });
+          } else {
+            set({ clipboardCountdown: count - 1 });
+          }
+        }, 1000);
+      },
+
+      clearClipboardCountdown: () => {
+        if (globalClipboardInterval) {
+          clearInterval(globalClipboardInterval);
+          globalClipboardInterval = null;
+        }
+        set({ clipboardCountdown: null });
       },
     }));
