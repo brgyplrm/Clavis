@@ -18,7 +18,7 @@ pub struct AppState {
     /// Global counter representing the current clipboard write sequence to handle concurrent auto-clears.
     pub clipboard_epoch: Mutex<u64>,
     /// WebSocket session token.
-    pub ws_token: String,
+    pub ws_token: Mutex<String>,
 }
 
 /// Helper function to retrieve the database pool from AppState.
@@ -73,6 +73,17 @@ pub async fn create_vault(
     *state.db.lock().unwrap() = Some(pool);
     *state.session_key.lock().unwrap() = Some(derived_key);
 
+    // Generate and set secure WebSocket token on initialization/unlock
+    {
+        let mut ws_token_guard = state.ws_token.lock().unwrap();
+        let mut token_bytes = [0u8; 32];
+        use ring::rand::SecureRandom;
+        ring::rand::SystemRandom::new()
+            .fill(&mut token_bytes)
+            .expect("Failed to generate secure random token");
+        *ws_token_guard = hex::encode(token_bytes);
+    }
+
     Ok(())
 }
 
@@ -120,6 +131,17 @@ pub async fn unlock(
     *state.db.lock().unwrap() = Some(pool);
     *state.session_key.lock().unwrap() = Some(derived_key);
 
+    // Generate and set secure WebSocket token on unlock
+    {
+        let mut ws_token_guard = state.ws_token.lock().unwrap();
+        let mut token_bytes = [0u8; 32];
+        use ring::rand::SecureRandom;
+        ring::rand::SystemRandom::new()
+            .fill(&mut token_bytes)
+            .expect("Failed to generate secure random token");
+        *ws_token_guard = hex::encode(token_bytes);
+    }
+
     Ok(())
 }
 
@@ -129,6 +151,10 @@ pub fn lock(state: State<'_, AppState>) -> Result<()> {
     // Zero out memory and close connections
     *state.db.lock().unwrap() = None;
     *state.session_key.lock().unwrap() = None;
+
+    // Clear WebSocket token on lock
+    state.ws_token.lock().unwrap().clear();
+
     Ok(())
 }
 

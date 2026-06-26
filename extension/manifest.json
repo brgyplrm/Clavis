@@ -1,15 +1,15 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "Clavis Browser Companion",
   "version": "0.1.0",
   "description": "Companion browser extension for the Clavis desktop password manager.",
   "permissions": [
     "activeTab",
-    "nativeMessaging"
+    "nativeMessaging",
+    "<all_urls>"
   ],
   "background": {
-    "service_worker": "src/background.js",
-    "type": "module"
+    "scripts": ["src/ws-client.js", "src/background.js"]
   },
   "content_scripts": [
     {
@@ -18,8 +18,12 @@
       "run_at": "document_idle"
     }
   ],
-  "action": {
-    "default_popup": "src/popup/popup.html"
+  "browser_action": {
+    "default_popup": "src/popup/index.html"
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyyCjMcIU4BPxp7VXmOF3MEjJ5A0seNEPc47qtL6CNPs17/sssP7rX6UDr8VTtcdg+hoDc/dSGmVREFNw2p+BiF8ARSm1NunMh8y9W5+B21STau/rySHgXwJoA3dqK04I3ok1oTtUeqRy12eqHArWHhELg1BosSGswi/5YJQ94CpaIXCQZrcJijl1PVsQl3ra5F9fwvxGS3UrmyJYM/LYDl+TuCwG9FzYat2OxJb9WXWBYAqq7fGRW8EEHsM4dZxQuUmDBCO1FRvBYeYDGFXgRo/9s7CMwclMz4IJuhV0+IuRqexZKJitoCFsNZWwA7BgXmyQb560DZBTspgVcXfsLQIDAQAB"
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "clavis@achyllisss.com"
+    }
+  }
 }

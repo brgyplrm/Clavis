@@ -1,7 +1,10 @@
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -34,7 +37,13 @@ pub enum ExtensionRequest {
     #[serde(rename = "list_entries")]
     ListEntries,
     #[serde(rename = "decrypt_entry")]
-    DecryptEntry { id: String },
+    DecryptEntry { entry_id: String },
+    #[serde(rename = "create_entry")]
+    CreateEntry {
+        title: String,
+        username: Option<String>,
+        password: String,
+    },
 }
 
 #[derive(Serialize, Debug)]
@@ -52,7 +61,7 @@ pub enum ExtensionResponse {
     DecryptResponse {
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
+        entry_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,6 +70,12 @@ pub enum ExtensionResponse {
         password: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         totp: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    #[serde(rename = "create_response")]
+    CreateResponse {
+        success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
@@ -76,30 +91,15 @@ pub struct ExtensionEntrySummary {
     pub has_totp: bool,
 }
 
-/// Start the WebSocket server listening on 127.0.0.1:32200.
+/// Start the WebSocket server listening on 127.0.0.1:59001.
 pub async fn start_server(app_handle: AppHandle) -> Result<()> {
-    let state = app_handle.state::<AppState>();
-    let token = state.ws_token.clone();
-
-    // Write the ws.json file with the port and token
-    if let Ok(app_dir) = app_handle.path().app_data_dir() {
-        if !app_dir.exists() {
-            let _ = std::fs::create_dir_all(&app_dir);
-        }
-        let ws_info_path = app_dir.join("ws.json");
-        let ws_info = serde_json::json!({
-            "port": 32200,
-            "token": token
-        });
-        if let Ok(ws_info_str) = serde_json::to_string(&ws_info) {
-            let _ = std::fs::write(&ws_info_path, ws_info_str);
-        }
-    }
+    // Start the in-memory IPC server for native messaging
+    start_ipc_server(app_handle.clone()).await?;
 
     // Automatically register the Native Messaging Host manifest for Chrome, Chromium, and Firefox!
     let _ = register_native_messaging_host(&app_handle);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 32200));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 59001));
     let listener = TcpListener::bind(&addr).await?;
 
     while let Ok((stream, _)) = listener.accept().await {
@@ -115,46 +115,43 @@ pub async fn start_server(app_handle: AppHandle) -> Result<()> {
 }
 
 async fn handle_connection(stream: TcpStream, app_handle: AppHandle) -> Result<()> {
-    let ws_stream = accept_async(stream)
-        .await
-        .map_err(|e| Error::Totp(format!("WebSocket handshake failed: {}", e)))?;
-
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let state = app_handle.state::<AppState>();
-    let expected_token = state.ws_token.clone();
+    let expected_token = state.ws_token.lock().unwrap().clone();
 
-    // 1. Perform authentication within a 5-second timeout
-    let auth_future = async {
-        if let Some(msg_result) = ws_receiver.next().await {
-            let msg = msg_result.map_err(|e| Error::Totp(e.to_string()))?;
-            if let Message::Text(text) = msg {
-                if let Ok(req) = serde_json::from_str::<ExtensionEnvelope>(&text) {
-                    if let ExtensionRequest::Auth { token } = req.payload {
-                        if token == expected_token {
-                            return std::result::Result::<bool, Error>::Ok(true);
-                        }
-                    }
+    // 1. Perform handshake and validate token in Sec-WebSocket-Protocol header
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let is_valid = std::sync::Arc::new(AtomicBool::new(false));
+    let is_valid_clone = is_valid.clone();
+    let expected_token_clone = expected_token.clone();
+
+    let ws_stream = accept_hdr_async(stream, move |request: &Request, mut response: Response| {
+        if let Some(protocol) = request.headers().get("Sec-WebSocket-Protocol") {
+            if let Ok(protocol_str) = protocol.to_str() {
+                if protocol_str == expected_token_clone {
+                    is_valid_clone.store(true, Ordering::SeqCst);
+                    let headers = response.headers_mut();
+                    headers.insert("Sec-WebSocket-Protocol", protocol.clone());
                 }
             }
         }
-        std::result::Result::<bool, Error>::Ok(false)
-    };
+        Ok(response)
+    })
+    .await
+    .map_err(|e| Error::Totp(format!("WebSocket handshake failed: {}", e)))?;
 
-    let auth_success = tokio::time::timeout(std::time::Duration::from_secs(5), auth_future)
-        .await
-        .map_err(|_| Error::Totp("Auth timeout".to_string()))?
-        .unwrap_or(false);
+    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
-    if !auth_success {
-        let resp = ExtensionEnvelopeResponse {
-            id: None,
-            payload: ExtensionResponse::AuthResponse { success: false },
+    // If token validation failed, close immediately with code 1008 (Policy)
+    if !is_valid.load(Ordering::SeqCst) {
+        let close_frame = CloseFrame {
+            code: CloseCode::Policy,
+            reason: std::borrow::Cow::Borrowed("Policy Violation"),
         };
-        let _ = ws_sender.send(Message::Text(serde_json::to_string(&resp).unwrap())).await;
+        let _ = ws_sender.send(Message::Close(Some(close_frame))).await;
         return Ok(());
     }
 
-    // Auth succeeded
+    // Auth succeeded - notify the client immediately
     let resp = ExtensionEnvelopeResponse {
         id: None,
         payload: ExtensionResponse::AuthResponse { success: true },
@@ -165,6 +162,14 @@ async fn handle_connection(stream: TcpStream, app_handle: AppHandle) -> Result<(
 
     // 2. Start request handling loop
     while let Some(msg_result) = ws_receiver.next().await {
+        // Active session invalidation check on lock/rotation
+        {
+            let current_token = state.ws_token.lock().unwrap().clone();
+            if current_token.is_empty() || current_token != expected_token {
+                break;
+            }
+        }
+
         let msg = match msg_result {
             Ok(m) => m,
             Err(e) => {
@@ -245,22 +250,22 @@ async fn process_request(req: &ExtensionRequest, state: &AppState) -> ExtensionR
                 Err(e) => ExtensionResponse::Error { message: format!("Database error: {}", e) },
             }
         }
-        ExtensionRequest::DecryptEntry { id } => {
+        ExtensionRequest::DecryptEntry { entry_id } => {
             let pool_opt = state.db.lock().unwrap().clone();
             let pool = match pool_opt {
                 Some(p) => p,
-                None => return ExtensionResponse::DecryptResponse { success: false, id: None, title: None, username: None, password: None, totp: None, error: Some("vault_locked".to_string()) },
+                None => return ExtensionResponse::DecryptResponse { success: false, entry_id: None, title: None, username: None, password: None, totp: None, error: Some("vault_locked".to_string()) },
             };
 
             let row_res = sqlx::query("SELECT id, title, username, ciphertext, nonce, totp_secret FROM entries WHERE id = ?")
-                .bind(id)
+                .bind(entry_id)
                 .fetch_optional(&pool)
                 .await;
 
             let row = match row_res {
                 Ok(Some(r)) => r,
-                Ok(None) => return ExtensionResponse::DecryptResponse { success: false, id: None, title: None, username: None, password: None, totp: None, error: Some("entry_not_found".to_string()) },
-                Err(e) => return ExtensionResponse::DecryptResponse { success: false, id: None, title: None, username: None, password: None, totp: None, error: Some(format!("Database error: {}", e)) },
+                Ok(None) => return ExtensionResponse::DecryptResponse { success: false, entry_id: None, title: None, username: None, password: None, totp: None, error: Some("entry_not_found".to_string()) },
+                Err(e) => return ExtensionResponse::DecryptResponse { success: false, entry_id: None, title: None, username: None, password: None, totp: None, error: Some(format!("Database error: {}", e)) },
             };
 
             use sqlx::Row;
@@ -274,7 +279,7 @@ async fn process_request(req: &ExtensionRequest, state: &AppState) -> ExtensionR
                 let guard = state.session_key.lock().unwrap();
                 let session_key = match guard.as_ref() {
                     Some(key) => key,
-                    None => return ExtensionResponse::DecryptResponse { success: false, id: None, title: None, username: None, password: None, totp: None, error: Some("vault_locked".to_string()) },
+                    None => return ExtensionResponse::DecryptResponse { success: false, entry_id: None, title: None, username: None, password: None, totp: None, error: Some("vault_locked".to_string()) },
                 };
 
                 let password_bytes_res = crate::crypto::cipher::decrypt(&**session_key, &ciphertext, &nonce);
@@ -310,14 +315,14 @@ async fn process_request(req: &ExtensionRequest, state: &AppState) -> ExtensionR
 
             let mut password = match password_res {
                 Ok(p) => p,
-                Err(e) => return ExtensionResponse::DecryptResponse { success: false, id: None, title: None, username: None, password: None, totp: None, error: Some(e) },
+                Err(e) => return ExtensionResponse::DecryptResponse { success: false, entry_id: None, title: None, username: None, password: None, totp: None, error: Some(e) },
             };
 
             let totp_secret = match totp_secret_res {
                 Ok(t) => t,
                 Err(e) => {
                     password.zeroize();
-                    return ExtensionResponse::DecryptResponse { success: false, id: None, title: None, username: None, password: None, totp: None, error: Some(e) };
+                    return ExtensionResponse::DecryptResponse { success: false, entry_id: None, title: None, username: None, password: None, totp: None, error: Some(e) };
                 }
             };
 
@@ -347,7 +352,7 @@ async fn process_request(req: &ExtensionRequest, state: &AppState) -> ExtensionR
 
             let resp = ExtensionResponse::DecryptResponse {
                 success: true,
-                id: Some(id.clone()),
+                entry_id: Some(entry_id.clone()),
                 title: Some(title),
                 username,
                 password: Some(password.clone()),
@@ -359,13 +364,70 @@ async fn process_request(req: &ExtensionRequest, state: &AppState) -> ExtensionR
 
             resp
         }
+        ExtensionRequest::CreateEntry { title, username, password } => {
+            let pool_opt = state.db.lock().unwrap().clone();
+            let pool = match pool_opt {
+                Some(p) => p,
+                None => return ExtensionResponse::CreateResponse { success: false, error: Some("vault_locked".to_string()) },
+            };
+
+            // Get the first vault in the database to save the entry in
+            let vault_id: String = match sqlx::query_scalar("SELECT id FROM vaults LIMIT 1")
+                .fetch_one(&pool)
+                .await
+            {
+                Ok(id) => id,
+                Err(e) => return ExtensionResponse::CreateResponse { success: false, error: Some(format!("No vault found in database: {}", e)) },
+            };
+
+            let id = uuid::Uuid::new_v4().to_string();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+
+            // Lock and encrypt the password
+            let (ciphertext, nonce) = {
+                let guard = state.session_key.lock().unwrap();
+                let session_key = match guard.as_ref() {
+                    Some(key) => key,
+                    None => return ExtensionResponse::CreateResponse { success: false, error: Some("vault_locked".to_string()) },
+                };
+
+                match crate::crypto::cipher::encrypt(&**session_key, password.as_bytes()) {
+                    Ok(res) => res,
+                    Err(e) => return ExtensionResponse::CreateResponse { success: false, error: Some(format!("Encryption failed: {}", e)) },
+                }
+            };
+
+            match sqlx::query(
+                "INSERT INTO entries (id, vault_id, title, username, ciphertext, nonce, totp_secret, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)"
+            )
+            .bind(&id)
+            .bind(&vault_id)
+            .bind(title)
+            .bind(username)
+            .bind(&ciphertext)
+            .bind(&nonce)
+            .bind(now)
+            .bind(now)
+            .execute(&pool)
+            .await
+            {
+                Ok(_) => ExtensionResponse::CreateResponse { success: true, error: None },
+                Err(e) => ExtensionResponse::CreateResponse { success: false, error: Some(format!("Database error: {}", e)) },
+            }
+        }
     }
 }
 
 pub fn register_native_messaging_host(_app_handle: &AppHandle) -> Result<()> {
     let current_exe = std::env::current_exe()
         .map_err(|e| Error::Io(e))?;
-    let exe_path = current_exe.to_string_lossy().to_string();
+    let mut bridge_exe = current_exe.clone();
+    bridge_exe.set_file_name("clavis-bridge");
+    let exe_path = bridge_exe.to_string_lossy().to_string();
 
     let home = std::env::var("HOME").unwrap_or_default();
     if home.is_empty() {
@@ -409,6 +471,9 @@ pub fn register_native_messaging_host(_app_handle: &AppHandle) -> Result<()> {
     let firefox_dir = std::path::PathBuf::from(&home)
         .join(".mozilla")
         .join("native-messaging-hosts");
+    let floorp_dir = std::path::PathBuf::from(&home)
+        .join(".floorp")
+        .join("native-messaging-hosts");
 
     if let Err(e) = std::fs::create_dir_all(&chrome_dir) {
         eprintln!("Failed to create Google Chrome NativeMessagingHosts dir: {:?}", e);
@@ -431,12 +496,290 @@ pub fn register_native_messaging_host(_app_handle: &AppHandle) -> Result<()> {
         let _ = std::fs::write(&manifest_path, serde_json::to_string_pretty(&firefox_manifest).unwrap());
     }
 
+    if let Err(e) = std::fs::create_dir_all(&floorp_dir) {
+        eprintln!("Failed to create Floorp native-messaging-hosts dir: {:?}", e);
+    } else {
+        let manifest_path = floorp_dir.join(format!("{}.json", manifest_name));
+        let _ = std::fs::write(&manifest_path, serde_json::to_string_pretty(&firefox_manifest).unwrap());
+    }
+
+    // Register Flatpak wrapper if any Flatpak sandboxed browsers are detected
+    let flatpak_dirs = vec![
+        (
+            "one.ablaze.floorp",
+            std::path::PathBuf::from(&home)
+                .join(".var")
+                .join("app")
+                .join("one.ablaze.floorp")
+                .join(".floorp")
+                .join("native-messaging-hosts"),
+            true,
+        ),
+        (
+            "one.ablaze.floorp",
+            std::path::PathBuf::from(&home)
+                .join(".var")
+                .join("app")
+                .join("one.ablaze.floorp")
+                .join(".mozilla")
+                .join("native-messaging-hosts"),
+            true,
+        ),
+        (
+            "org.mozilla.firefox",
+            std::path::PathBuf::from(&home)
+                .join(".var")
+                .join("app")
+                .join("org.mozilla.firefox")
+                .join(".mozilla")
+                .join("native-messaging-hosts"),
+            true,
+        ),
+        (
+            "com.google.Chrome",
+            std::path::PathBuf::from(&home)
+                .join(".var")
+                .join("app")
+                .join("com.google.Chrome")
+                .join(".config")
+                .join("google-chrome")
+                .join("NativeMessagingHosts"),
+            false,
+        ),
+        (
+            "org.chromium.Chromium",
+            std::path::PathBuf::from(&home)
+                .join(".var")
+                .join("app")
+                .join("org.chromium.Chromium")
+                .join(".config")
+                .join("chromium")
+                .join("NativeMessagingHosts"),
+            false,
+        ),
+    ];
+
+    for (app_id, flatpak_dir, is_firefox) in flatpak_dirs {
+        let app_base = std::path::PathBuf::from(&home)
+            .join(".var")
+            .join("app")
+            .join(app_id);
+        if app_base.exists() {
+            if let Err(e) = std::fs::create_dir_all(&flatpak_dir) {
+                eprintln!("Failed to create Flatpak {} native-messaging-hosts dir: {:?}", app_id, e);
+                continue;
+            }
+
+            let wrapper_path = flatpak_dir.join(format!("{}-wrapper", manifest_name));
+            let wrapper_content = format!(
+                "#!/bin/bash\nLOG_FILE=\"$HOME/clavis-wrapper.log\"\necho \"[$(date)] Wrapper started with args: $@\" >> \"$LOG_FILE\"\nflatpak-spawn --host {} \"$@\" 2>> \"$LOG_FILE\"\nCODE=$?\necho \"[$(date)] Wrapper finished with exit code: $CODE\" >> \"$LOG_FILE\"\nexit $CODE\n",
+                exe_path
+            );
+            if std::fs::write(&wrapper_path, wrapper_content).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = std::fs::metadata(&wrapper_path) {
+                        let mut perms = metadata.permissions();
+                        perms.set_mode(0o755);
+                        let _ = std::fs::set_permissions(&wrapper_path, perms);
+                    }
+                }
+            }
+
+            let wrapper_path_str = wrapper_path.to_string_lossy().to_string();
+            let manifest = if is_firefox {
+                serde_json::json!({
+                    "name": manifest_name,
+                    "description": "Clavis Browser Companion Broker (Flatpak wrapper)",
+                    "path": wrapper_path_str,
+                    "type": "stdio",
+                    "allowed_extensions": firefox_extensions
+                })
+            } else {
+                serde_json::json!({
+                    "name": manifest_name,
+                    "description": "Clavis Browser Companion Broker (Flatpak wrapper)",
+                    "path": wrapper_path_str,
+                    "type": "stdio",
+                    "allowed_origins": chrome_origins
+                })
+            };
+
+            let manifest_path = flatpak_dir.join(format!("{}.json", manifest_name));
+            let _ = std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap());
+        }
+    }
+
     Ok(())
 }
 
+fn get_app_data_dir() -> Option<std::path::PathBuf> {
+    let bundle_id = "com.achyllisss.clavis";
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("APPDATA").ok().map(|p| std::path::PathBuf::from(p).join(bundle_id))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var("HOME").ok().map(|h| {
+            std::path::PathBuf::from(h)
+                .join("Library")
+                .join("Application Support")
+                .join(bundle_id)
+        })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // Linux/Unix fallback
+        let home = std::env::var("HOME").ok()?;
+        let xdg_data = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(home).join(".local").join("share"));
+        Some(xdg_data.join(bundle_id))
+    }
+}
+
+#[cfg(unix)]
+async fn start_ipc_server(app_handle: AppHandle) -> Result<()> {
+    let app_dir = app_handle.path().app_data_dir()
+        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+    let socket_path = app_dir.join("ipc.sock");
+    if socket_path.exists() {
+        let _ = std::fs::remove_file(&socket_path);
+    }
+    if !app_dir.exists() {
+        let _ = std::fs::create_dir_all(&app_dir);
+    }
+    let listener = tokio::net::UnixListener::bind(&socket_path)
+        .map_err(|e| Error::Io(e))?;
+
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let state = app_handle.state::<AppState>();
+            let current_token = state.ws_token.lock().unwrap().clone();
+            let response = serde_json::json!({
+                "success": true,
+                "port": 59001,
+                "token": current_token
+            });
+            if let Ok(resp_str) = serde_json::to_string(&response) {
+                use tokio::io::AsyncWriteExt;
+                let _ = stream.write_all(resp_str.as_bytes()).await;
+            }
+        }
+    });
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn start_ipc_server(app_handle: AppHandle) -> Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let pipe_name = r"\\.\pipe\com.achyllisss.clavis.ipc";
+
+    tokio::spawn(async move {
+        loop {
+            let mut server = match ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(pipe_name)
+            {
+                Ok(s) => s,
+                Err(_) => {
+                    match ServerOptions::new().create(pipe_name) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("Failed to create named pipe instance: {:?}", e);
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            if server.connect().await.is_ok() {
+                let state = app_handle.state::<AppState>();
+                let current_token = state.ws_token.lock().unwrap().clone();
+                let response = serde_json::json!({
+                    "success": true,
+                    "port": 59001,
+                    "token": current_token
+                });
+                if let Ok(resp_str) = serde_json::to_string(&response) {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = server.write_all(resp_str.as_bytes()).await;
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
+fn query_ipc_server() -> serde_json::Value {
+    let app_dir = match get_app_data_dir() {
+        Some(dir) => dir,
+        None => return serde_json::json!({ "success": false, "error": "Could not resolve app data directory" }),
+    };
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        use std::io::Read;
+
+        let socket_path = app_dir.join("ipc.sock");
+        let mut stream = match UnixStream::connect(&socket_path) {
+            Ok(s) => s,
+            Err(e) => return serde_json::json!({ "success": false, "error": format!("Could not connect to IPC socket: {}", e) }),
+        };
+
+        let mut buf = String::new();
+        if stream.read_to_string(&mut buf).is_ok() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&buf) {
+                val
+            } else {
+                serde_json::json!({ "success": false, "error": "Invalid IPC response format" })
+            }
+        } else {
+            serde_json::json!({ "success": false, "error": "Could not read from IPC socket" })
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        use std::io::Read;
+        use std::fs::OpenOptions;
+
+        let pipe_name = r"\\.\pipe\com.achyllisss.clavis.ipc";
+        let mut file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(pipe_name)
+        {
+            Ok(f) => f,
+            Err(e) => return serde_json::json!({ "success": false, "error": format!("Could not connect to Named Pipe: {}", e) }),
+        };
+
+        let mut buf = String::new();
+        if file.read_to_string(&mut buf).is_ok() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&buf) {
+                val
+            } else {
+                serde_json::json!({ "success": false, "error": "Invalid IPC response format" })
+            }
+        } else {
+            serde_json::json!({ "success": false, "error": "Could not read from Named Pipe" })
+        }
+    }
+}
+
 pub fn run_native_messaging() {
+    if let Some(app_dir) = get_app_data_dir() {
+        let log_path = app_dir.join("native-messaging.log");
+        let _ = std::fs::write(&log_path, format!("[{:?}] Native Messaging Host started.\n", std::time::SystemTime::now()));
+    }
+
     use std::io::{self, Read, Write};
-    use serde_json::json;
 
     let stdin = io::stdin();
     let mut stdin_handle = stdin.lock();
@@ -455,30 +798,7 @@ pub fn run_native_messaging() {
             break;
         }
 
-        let home = std::env::var("HOME").unwrap_or_default();
-        let ws_path = std::path::PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("com.achyllisss.clavis")
-            .join("ws.json");
-
-        let response = if ws_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&ws_path) {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    json!({
-                        "success": true,
-                        "port": 32200,
-                        "token": val.get("token")
-                    })
-                } else {
-                    json!({ "success": false, "error": "Invalid ws.json format" })
-                }
-            } else {
-                json!({ "success": false, "error": "Could not read ws.json" })
-            }
-        } else {
-            json!({ "success": false, "error": "Vault is locked or Clavis is not running" })
-        };
+        let response = query_ipc_server();
 
         let response_str = response.to_string();
         let response_bytes = response_str.as_bytes();

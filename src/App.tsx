@@ -47,6 +47,8 @@ function App() {
             if (idleTimer) window.clearTimeout(idleTimer);
             // Fetch fresh settings state
             const { idleTimeout } = useVaultStore.getState();
+            
+            if (idleTimeout === 0) return; // Never lock
   
             idleTimer = window.setTimeout(() => {
               console.log("Idle timeout reached. Locking vault...");

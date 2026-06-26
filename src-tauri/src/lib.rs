@@ -26,28 +26,30 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let ws_token = uuid::Uuid::new_v4().to_string();
+    let mut token_bytes = [0u8; 32];
+    {
+        use ring::rand::SecureRandom;
+        ring::rand::SystemRandom::new()
+            .fill(&mut token_bytes)
+            .expect("Failed to generate secure random token");
+    }
+    let ws_token = hex::encode(token_bytes);
 
     let app = tauri::Builder::default()
         .manage(AppState {
             db: Mutex::new(None),
             session_key: Mutex::new(None),
             clipboard_epoch: Mutex::new(0),
-            ws_token,
+            ws_token: Mutex::new(ws_token),
         })
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                rt.block_on(async {
-                    if let Err(e) = ws::start_server(app_handle).await {
-                        eprintln!("WebSocket server error: {:?}", e);
-                    }
-                });
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = ws::start_server(app_handle).await {
+                    eprintln!("FATAL: WebSocket server error: {:?}", e);
+                    std::process::exit(1);
+                }
             });
             Ok(())
         })
@@ -83,8 +85,11 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
             if let Ok(app_dir) = app_handle.path().app_data_dir() {
-                let ws_info_path = app_dir.join("ws.json");
-                let _ = std::fs::remove_file(ws_info_path);
+                #[cfg(unix)]
+                {
+                    let socket_path = app_dir.join("ipc.sock");
+                    let _ = std::fs::remove_file(socket_path);
+                }
             }
         }
     });

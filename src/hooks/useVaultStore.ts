@@ -257,8 +257,9 @@ let globalClipboardInterval: any = null;
         try {
           const timeoutStr = await getSetting("idle_timeout");
           const focusLostStr = await getSetting("lock_on_focus_lost");
+          const parsedTimeout = parseInt(timeoutStr, 10);
           set({
-            idleTimeout: parseInt(timeoutStr, 10) || 300,
+            idleTimeout: isNaN(parsedTimeout) ? 300 : parsedTimeout,
             lockOnFocusLost: focusLostStr === "true",
           });
         } catch (err: any) {
@@ -270,7 +271,8 @@ let globalClipboardInterval: any = null;
         try {
           await setSetting(key, value);
           if (key === "idle_timeout") {
-            set({ idleTimeout: parseInt(value, 10) || 300 });
+            const parsedValue = parseInt(value, 10);
+            set({ idleTimeout: isNaN(parsedValue) ? 300 : parsedValue });
           } else if (key === "lock_on_focus_lost") {
             set({ lockOnFocusLost: value === "true" });
           }

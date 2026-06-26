@@ -1,3 +1,4 @@
+"use strict";
 document.addEventListener("DOMContentLoaded", () => {
     const statusBadge = document.getElementById("status-badge");
     const lockedView = document.getElementById("locked-view");
@@ -30,14 +31,39 @@ document.addEventListener("DOMContentLoaded", () => {
         unlockedView.classList.remove("hidden");
     }
     function loadEntries() {
-        chrome.runtime.sendMessage({ type: "list_entries" }, (response) => {
-            if (response && response.success) {
-                allEntries = response.entries || [];
-                renderEntries(allEntries);
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            let hostname = "";
+            if (tabs && tabs[0] && tabs[0].url) {
+                try {
+                    hostname = new URL(tabs[0].url).hostname;
+                }
+                catch (e) {
+                    // Ignore parse errors (e.g. chrome:// links)
+                }
             }
-            else {
-                showLockedState();
-            }
+            // Fetch all entries so search works immediately
+            chrome.runtime.sendMessage({ type: "list_entries" }, (allResponse) => {
+                if (allResponse && allResponse.success) {
+                    allEntries = allResponse.entries || [];
+                    if (hostname) {
+                        // Retrieve matches for this site
+                        chrome.runtime.sendMessage({ type: "credential_request", hostname }, (matchResponse) => {
+                            if (matchResponse && matchResponse.success && matchResponse.matches && matchResponse.matches.length > 0) {
+                                renderEntries(matchResponse.matches);
+                            }
+                            else {
+                                renderEntries([]); // Trigger "No saved credentials for this site"
+                            }
+                        });
+                    }
+                    else {
+                        renderEntries([]);
+                    }
+                }
+                else {
+                    showLockedState();
+                }
+            });
         });
     }
     function renderEntries(entries) {
@@ -45,7 +71,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (entries.length === 0) {
             const li = document.createElement("li");
             li.className = "no-entries";
-            li.textContent = "No entries found";
+            li.textContent = "No saved credentials for this site";
             entriesList.appendChild(li);
             return;
         }
@@ -53,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const li = document.createElement("li");
             li.className = "entry-item";
             li.dataset.id = entry.id;
+            li.tabIndex = 0; // Keyboard navigation focus
             const detailsDiv = document.createElement("div");
             detailsDiv.className = "entry-details";
             const titleSpan = document.createElement("span");
@@ -71,15 +98,23 @@ document.addEventListener("DOMContentLoaded", () => {
             const fillBtn = document.createElement("button");
             fillBtn.className = "fill-btn";
             fillBtn.textContent = "Autofill";
+            fillBtn.tabIndex = 0;
             fillBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 fillEntry(entry.id, fillBtn);
             });
             actionsDiv.appendChild(fillBtn);
             li.appendChild(actionsDiv);
-            // Clicking the entire row fills it as well
+            // Mouse click triggers autofill
             li.addEventListener("click", () => {
                 fillEntry(entry.id, fillBtn);
+            });
+            // Keyboard press triggers autofill
+            li.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    fillEntry(entry.id, fillBtn);
+                }
             });
             entriesList.appendChild(li);
         });
@@ -92,15 +127,15 @@ document.addEventListener("DOMContentLoaded", () => {
             button.disabled = false;
             if (response && response.success) {
                 button.textContent = "Filled!";
-                button.style.background = "linear-gradient(135deg, #10b981 0%, #059669 100%)"; // Green
+                button.style.background = "linear-gradient(135deg, #10b981 0%, #059669 100%)";
                 setTimeout(() => {
                     button.textContent = originalText;
-                    button.style.background = ""; // restore default
+                    button.style.background = "";
                 }, 1500);
             }
             else {
                 button.textContent = "Error";
-                button.style.background = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"; // Red
+                button.style.background = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)";
                 setTimeout(() => {
                     button.textContent = originalText;
                     button.style.background = "";
@@ -118,4 +153,3 @@ document.addEventListener("DOMContentLoaded", () => {
     // Run initial state update
     updateUI();
 });
-export {};
