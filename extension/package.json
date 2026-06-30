@@ -6,5 +6,8 @@
     "build:chrome": "node build.js chrome",
     "build:firefox": "node build.js firefox",
     "build:all": "npm run build:chrome && npm run build:firefox"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
   }
 }

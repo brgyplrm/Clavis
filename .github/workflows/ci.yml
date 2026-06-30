@@ -78,7 +78,7 @@ jobs:
 
     # 9. Verify licenses and duplicate crates (Cargo Deny)
     - name: Cargo deny
-      uses: embark-studios/cargo-deny-action@v2
+      uses: EmbarkStudios/cargo-deny-action@v2
       with:
         manifest-path: src-tauri/Cargo.toml
 
