@@ -1,0 +1,10 @@
+{
+  "name": "clavis-extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:chrome": "node build.js chrome",
+    "build:firefox": "node build.js firefox",
+    "build:all": "npm run build:chrome && npm run build:firefox"
+  }
+}

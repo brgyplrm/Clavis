@@ -56,3 +56,9 @@ src-tauri/updater-key.pem
 
 # cargo audit and deny cache
 .cargo/advisory-db/
+
+# Extension build outputs
+extension/build/
+extension/clavis-extension-chrome.zip
+extension/clavis-extension-firefox.zip
+extension/clavis-extension-firefox-source.zip

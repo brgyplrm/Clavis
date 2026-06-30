@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 import { avatarColor, initials } from "./Dashboard";
 import { useVaultStore } from "../hooks/useVaultStore";
 import TotpDisplay from "../components/TotpDisplay";
+import PageHelp from "../components/ui/PageHelp";
 import { listCaptureSources, captureSource, CaptureSource } from "../lib/tauri";
 
 interface ParsedOtp {
@@ -269,6 +270,14 @@ export default function Authenticator() {
         <div className="flex items-center gap-2">
           <Clock className="h-5 w-5 text-purple" />
           <h1 className="text-sm font-semibold">Authenticator</h1>
+          <PageHelp 
+            title="Authenticator Guide"
+            description="Generate rotating 6-digit TOTP verification codes for your 2FA accounts. Setup via manual secret key input or by scanning a QR code from screen capture."
+            tips={[
+              "The codes regenerate every 30 seconds automatically.",
+              "Click the copy button or code block to copy instantly."
+            ]}
+          />
         </div>
         <div className="flex items-center gap-2">
           <div className="relative max-w-xs">

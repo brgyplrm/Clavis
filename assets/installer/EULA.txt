@@ -1,0 +1,21 @@
+Clavis End User License Agreement (EULA)
+
+Please read this End User License Agreement carefully before using Clavis.
+
+1. Local-Only Storage
+Clavis is designed as a local-first password manager. All passwords, metadata, keys, and settings are stored locally on your device in an encrypted SQLCipher SQLite database. We do not operate any cloud database, backend server, or synchronization service. You are solely responsible for managing and backing up your database file.
+
+2. Zero Telemetry & Privacy
+Your privacy is paramount. Clavis does not collect, log, transmit, or share any telemetry, system details, crash reports, analytics, or user activity logs. The application runs entirely isolated from third-party networks, with outbound internet connections strictly restricted to optional HIBP breach queries.
+
+3. Zero-Knowledge Framework
+Your master password is never stored anywhere on disk or transmitted. It is exclusively used to derive the database encryption key in memory using Argon2id. We have no means of resetting your password or recovering your data. If you forget your master password, your vault cannot be decrypted, and your data is permanently lost.
+
+4. No Warranty (Provided "AS IS")
+This software is provided "AS IS", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement.
+
+5. Limitation of Liability
+In no event shall the authors, developers, copyright holders, or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
+
+6. License References & External Terms
+This application incorporates components governed by various open-source licenses, including the MIT and Apache 2.0 licenses. By clicking "Accept", you agree to follow the terms of this license and all associated open-source component licenses.

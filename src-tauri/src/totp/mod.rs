@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::{Error, MutexExt, Result};
 use crate::vault::command::AppState;
 use sqlx::sqlite::SqlitePool;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,7 +7,7 @@ use totp_rs::{Algorithm, Secret, TOTP};
 use zeroize::{Zeroize, Zeroizing};
 
 fn get_pool(state: &State<'_, AppState>) -> Result<SqlitePool> {
-    state.db.lock().unwrap().clone().ok_or(Error::VaultLocked)
+    state.db.lock_safe().clone().ok_or(Error::VaultLocked)
 }
 
 #[derive(serde::Serialize)]
@@ -35,7 +35,7 @@ pub async fn get_totp_code(entry_id: String, state: State<'_, AppState>) -> Resu
 
     // Decrypt the TOTP secret inside a short-lived scope to release the MutexGuard immediately
     let mut decrypted_totp = {
-        let guard = state.session_key.lock().unwrap();
+        let guard = state.session_key.lock_safe();
         let session_key = guard.as_ref().ok_or(Error::VaultLocked)?;
 
         if totp_blob.len() < 12 {
@@ -60,16 +60,13 @@ pub async fn get_totp_code(entry_id: String, state: State<'_, AppState>) -> Resu
     let secret = Secret::Encoded(cleaned_secret.to_string());
     let step = 30;
 
-    let totp = TOTP::new(
-        Algorithm::SHA1,
-        6,
-        1,
-        step,
-        secret
-            .to_bytes()
-            .map_err(|e| Error::Totp(format!("Invalid Base32 secret: {}", e)))?,
-    )
-    .map_err(|e| Error::Totp(e.to_string()))?;
+    let secret_bytes = secret
+        .to_bytes()
+        .map_err(|e| Error::Totp(format!("Invalid Base32 secret: {}", e)))?;
+    let zeroized_bytes = Zeroizing::new(secret_bytes);
+
+    let totp = TOTP::new(Algorithm::SHA1, 6, 1, step, zeroized_bytes.to_vec())
+        .map_err(|e| Error::Totp(e.to_string()))?;
 
     let code = totp
         .generate_current()

@@ -1,4 +1,3 @@
-
 use crate::error::{Error, Result};
 use aes_gcm::{
     aead::{Aead, KeyInit},

@@ -47,6 +47,7 @@ function matchHostname(title: string, hostname: string): boolean {
 }
 
 let pendingSave: any = null;
+let pendingSaveTimeout: any = null;
 
 // Listen for messages from the popup and content script
 chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: any) => {
@@ -55,6 +56,16 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
   if (message.type === "set_pending_save") {
     console.log("[Background] Setting pending save:", message.pending);
     pendingSave = message.pending;
+    if (pendingSaveTimeout) {
+      clearTimeout(pendingSaveTimeout);
+    }
+    if (pendingSave) {
+      // Discard boundaries perfectly within 60 seconds if unconfirmed
+      pendingSaveTimeout = setTimeout(() => {
+        console.log("[Background] Pending save discarded after 60 seconds.");
+        pendingSave = null;
+      }, 60000);
+    }
     sendResponse({ success: true });
     return true;
   }
@@ -72,6 +83,9 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
 
       if (getBaseDomain(currentHost) === getBaseDomain(pendingHost)) {
         console.log("[Background] Pending save matches current domain, returning it.");
+        if (pendingSaveTimeout) {
+          clearTimeout(pendingSaveTimeout);
+        }
         sendResponse({ success: true, pending: pendingSave });
         pendingSave = null; // Consume
         return true;
@@ -168,22 +182,35 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
           sendResponse({ success: false, error: resp.error || "Failed to decrypt entry" });
         }
       });
-    } else if (message.type === "create_entry") {
-      console.log("[Background] Handling create_entry request:", message);
-      logToTab("[Background] create_entry requested for title:", message.title, "username:", message.username);
+    } else if (message.type === "create_entry" || message.type === "save_credential") {
+      const isSave = message.type === "save_credential";
+      console.log("[Background] Handling save request:", message);
+      logToTab("[Background] save requested for title:", message.title, "username:", message.username);
+      
       sendWsMessage({
-        type: "create_entry",
+        type: isSave ? "save_credential" : "create_entry",
         title: message.title,
         username: message.username,
         password: message.password
       }).then((resp) => {
-        console.log("[Background] create_entry ws response:", resp);
-        if (resp.type === "create_response" && resp.success) {
-          logToTab("[Background] Entry created successfully in database.");
+        console.log("[Background] save ws response:", resp);
+        const isSuccess = (isSave && resp.type === "save_response" && resp.success) || 
+                          (!isSave && resp.type === "create_response" && resp.success);
+                          
+        if (isSuccess) {
+          logToTab("[Background] Entry saved successfully in database.");
           sendResponse({ success: true });
         } else {
-          logToTab("[Background] Failed to create entry:", resp.error);
-          sendResponse({ success: false, error: resp.error || "Failed to create entry" });
+          logToTab("[Background] Failed to save entry:", resp.error);
+          sendResponse({ success: false, error: resp.error || "Failed to save entry" });
+        }
+      });
+    } else if (message.type === "get_blocklist") {
+      sendWsMessage({ type: "get_blocklist" }).then((resp) => {
+        if (resp.type === "blocklist_response") {
+          sendResponse({ success: true, domains: resp.domains });
+        } else {
+          sendResponse({ success: false, error: resp.error || "Failed to get blocklist" });
         }
       });
     }

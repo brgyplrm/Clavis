@@ -1,16 +1,20 @@
-use tauri::{AppHandle, Manager, State};
+use crate::error::{Error, MutexExt, Result};
 use crate::vault::command::AppState;
-use crate::error::{Error, Result};
 use std::time::Duration;
+use tauri::{AppHandle, Manager, State};
 
 /// Copies the given sensitive text (password, TOTP code) to the clipboard.
 /// Spawns an asynchronous background task (tokio::spawn) that sleeps for exactly 30 seconds
 /// then clears the clipboard if the contents have not been modified/replaced in the meantime.
 #[tauri::command]
-pub async fn copy_to_clipboard(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<()> {
+pub async fn copy_to_clipboard(
+    text: String,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<()> {
     // 1. Increment the epoch sequence to identify this copy operation uniquely
     let epoch = {
-        let mut guard = state.clipboard_epoch.lock().unwrap();
+        let mut guard = state.clipboard_epoch.lock_safe();
         *guard += 1;
         *guard
     };
@@ -27,7 +31,7 @@ pub async fn copy_to_clipboard(text: String, app_handle: AppHandle, state: State
 
         let state_in_thread = app_handle.state::<AppState>();
         let current_epoch = {
-            let guard = state_in_thread.clipboard_epoch.lock().unwrap();
+            let guard = state_in_thread.clipboard_epoch.lock_safe();
             *guard
         };
 

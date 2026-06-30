@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Clavis Browser Companion",
+  "name": "Clavis — Password Manager",
   "version": "0.1.0",
-  "description": "Companion browser extension for the Clavis desktop password manager.",
+  "description": "Auto-fill passwords, save new accounts, and securely connect to your local Clavis vault. No cloud. No telemetry.",
   "permissions": [
     "activeTab",
     "nativeMessaging",
@@ -23,7 +23,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "clavis@achyllisss.com"
+      "id": "clavis@clavis.app"
     }
   }
 }

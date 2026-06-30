@@ -252,3 +252,149 @@ export async function generatePassword(options: PasswordGeneratorOptions): Promi
     symbols: options.symbols,
   });
 }
+
+/**
+ * Closes the main window / exits the app.
+ */
+export async function closeWindow(): Promise<void> {
+  await invoke<void>("close_window");
+}
+
+/**
+ * Resizes the main window to its full, decorated main layout.
+ */
+export async function resizeToMainWindow(): Promise<void> {
+  await invoke<void>("resize_to_main_window");
+}
+
+/**
+ * Opens a URL in the user's default external browser.
+ */
+export async function openUrl(url: string): Promise<void> {
+  await invoke<void>("open_url", { url });
+}
+
+export interface SecurityQuestionAnswer {
+  question_id: number;
+  answer: string;
+}
+
+/**
+ * Initializes a new vault with master password, hint, and security questions.
+ */
+export async function createVaultWithSecurity(
+  password: string,
+  hint: string | null,
+  questionsAnswers: SecurityQuestionAnswer[]
+): Promise<void> {
+  await invoke<void>("create_vault_with_security", {
+    password,
+    hint,
+    question1Id: questionsAnswers[0].question_id,
+    answer1: questionsAnswers[0].answer,
+    question2Id: questionsAnswers[1].question_id,
+    answer2: questionsAnswers[1].answer,
+  });
+}
+
+/**
+ * Gets the plaintext password hint from the recovery file.
+ */
+export async function getPasswordHint(): Promise<string | null> {
+  return await invoke<string | null>("get_password_hint");
+}
+
+/**
+ * Gets the 2 recovery question IDs from the recovery file.
+ */
+export async function getRecoveryQuestions(): Promise<number[]> {
+  return await invoke<number[]>("get_recovery_questions");
+}
+
+/**
+ * Recovers a vault using security questions, re-encrypting it with a new master password.
+ */
+export async function recoverVault(
+  answer1: string,
+  answer2: string,
+  newPassword: string
+): Promise<void> {
+  await invoke<void>("recover_vault", {
+    answer1,
+    answer2,
+    newPassword,
+  });
+}
+
+/**
+ * Resets the master password using security questions.
+ */
+export async function resetMasterPassword(
+  answers: string[],
+  newPassword: string
+): Promise<void> {
+  await invoke<void>("recover_vault", {
+    answer1: answers[0],
+    answer2: answers[1],
+    newPassword,
+  });
+}
+
+export interface StrengthEstimate {
+  score: number;
+  entropy: number;
+  feedback: string[];
+}
+
+/**
+ * Estimates the password complexity, returning score (0-4), entropy, and suggestions.
+ */
+export async function estimatePasswordStrength(password: string): Promise<StrengthEstimate> {
+  return await invoke<StrengthEstimate>("estimate_password_strength", { password });
+}
+
+/**
+ * Verifies if the recovery answers are correct by attempting key decryption.
+ */
+export async function verifyRecoveryAnswers(answer1: string, answer2: string): Promise<boolean> {
+  return await invoke<boolean>("verify_recovery_answers", { answer1, answer2 });
+}
+
+/**
+ * Sets screen capture protection on the application window.
+ */
+export async function setScreenCaptureProtection(enabled: boolean): Promise<void> {
+  await invoke<void>("set_screen_capture_protection", { enabled });
+}
+
+/**
+ * Updates the global keyboard shortcut registered for Autotype.
+ */
+export async function updateAutotypeShortcut(shortcutStr: string): Promise<void> {
+  await invoke<void>("update_autotype_shortcut", { shortcutStr });
+}
+
+/**
+ * Unregisters all registered global shortcuts.
+ */
+export async function clearAllShortcuts(): Promise<void> {
+  await invoke<void>("clear_all_shortcuts");
+}
+
+export async function addToBlocklist(domain: string): Promise<void> {
+  await invoke<void>("add_to_blocklist", { domain });
+}
+
+export async function removeFromBlocklist(domain: string): Promise<void> {
+  await invoke<void>("remove_from_blocklist", { domain });
+}
+
+export interface DetectedBrowser {
+  name: string;
+  detected: boolean;
+  extension_installed: boolean;
+}
+
+export async function detectInstalledBrowsers(): Promise<DetectedBrowser[]> {
+  return await invoke<DetectedBrowser[]>("detect_installed_browsers");
+}

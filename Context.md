@@ -83,7 +83,7 @@ in a zeroize-protected wrapper and is wiped on
 full lock. Biometric authentication is handled 
 entirely by the OS (Windows Hello / Touch ID) 
 via Tauri plugins — no biometric data ever 
-touches PassVault's code or database. PIN 
+touches Clavis's code or database. PIN 
 attempts are limited to 5 before falling back 
 to master password only.
 

@@ -1,16 +1,138 @@
 import { useState, useEffect } from "react";
-import { Eye, EyeOff, ShieldCheck, Fingerprint, Grid3x3, Lock, Check } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, Fingerprint, Grid3x3, Lock, Check, X } from "lucide-react";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { useVaultStore } from "../hooks/useVaultStore";
 import { cn } from "../lib/utils";
-import { listVaults, deleteVault } from "../lib/tauri";
+import { listVaults, deleteVault, getPasswordHint, getRecoveryQuestions, verifyRecoveryAnswers } from "../lib/tauri";
+import ForgotPassword from "./ForgotPassword";
+import { SECURITY_QUESTIONS } from "../components/setup/StepQuestions";
+
+function calculateEntropy(password: string): number {
+  if (!password) return 0;
+  let poolSize = 0;
+  if (/[a-z]/.test(password)) poolSize += 26;
+  if (/[A-Z]/.test(password)) poolSize += 26;
+  if (/[0-9]/.test(password)) poolSize += 10;
+  if (/[^a-zA-Z0-9]/.test(password)) poolSize += 32;
+  
+  if (poolSize === 0) return 0;
+  return Math.round(password.length * Math.log2(poolSize));
+}
+
+import PasswordStrengthMeter from "../components/PasswordStrengthMeter";
+
+function RecoveryStrengthBar({ password }: { password: string }) {
+  return <PasswordStrengthMeter password={password} />;
+}
 
 export default function Unlock() {
-  const { unlock, loading, error, clearError } = useVaultStore();
+  const { unlock, recover, loading, error, clearError } = useVaultStore();
   const [show, setShow] = useState(false);
   const [pw, setPw] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Recovery States
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryStep, setRecoveryStep] = useState<"hint" | "questions" | "reset">("hint");
+  const [passwordHintText, setPasswordHintText] = useState<string | null>(null);
+  const [recoveryQuestions, setRecoveryQuestions] = useState<number[]>([]);
+  const [recAnswer1, setRecAnswer1] = useState("");
+  const [recAnswer2, setRecAnswer2] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoveryAttempts, setRecoveryAttempts] = useState(0);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showNewPwConfirm, setShowNewPwConfirm] = useState(false);
+
+  useEffect(() => {
+    if (showRecovery) {
+      setRecoveryError(null);
+      setShowNewPw(false);
+      setShowNewPwConfirm(false);
+      getPasswordHint().then(h => {
+        setPasswordHintText(h);
+      }).catch(err => {
+        console.error("Failed to load password hint:", err);
+      });
+    }
+  }, [showRecovery]);
+
+  const handleLoadQuestions = async () => {
+    setRecoveryError(null);
+    try {
+      const qIds = await getRecoveryQuestions();
+      setRecoveryQuestions(qIds);
+      setRecoveryStep("questions");
+    } catch (err: any) {
+      const errMsg = err.toString() || "";
+      if (errMsg.includes("Recovery configuration not found") || errMsg.includes("Recovery config not found") || errMsg.includes("not found")) {
+        setRecoveryError("This is a legacy vault lacking recovery questions. Please restore your vault from a backup.");
+      } else {
+        setRecoveryError(errMsg);
+      }
+    }
+  };
+
+  const handleVerifyQuestions = async () => {
+    if (recoveryAttempts >= 3) {
+      setRecoveryError("Recovery locked due to too many failed attempts. Please restart the application to try again.");
+      return;
+    }
+    if (!recAnswer1.trim() || !recAnswer2.trim()) {
+      setRecoveryError("Please answer both questions.");
+      return;
+    }
+    setRecoveryError(null);
+    try {
+      const isValid = await verifyRecoveryAnswers(recAnswer1, recAnswer2);
+      if (isValid) {
+        setRecoveryStep("reset");
+      } else {
+        const nextAttempts = recoveryAttempts + 1;
+        setRecoveryAttempts(nextAttempts);
+        if (nextAttempts >= 3) {
+          setRecoveryError("Recovery locked due to too many failed attempts. Please restart the application to try again.");
+        } else {
+          setRecoveryError(`Incorrect security answers (${nextAttempts}/3 attempts).`);
+        }
+      }
+    } catch (err: any) {
+      setRecoveryError(err.toString() || "Verification failed.");
+    }
+  };
+
+  const handlePerformRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (recoveryAttempts >= 3) {
+      setRecoveryError("Recovery locked due to too many failed attempts. Please restart the application to try again.");
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      setRecoveryError("Passwords do not match.");
+      return;
+    }
+    if (newPassword.length < 12) {
+      setRecoveryError("Password must be at least 12 characters.");
+      return;
+    }
+    setRecoveryError(null);
+    try {
+      await recover(recAnswer1, recAnswer2, newPassword);
+      localStorage.removeItem("clavis_stored_master_password");
+      localStorage.removeItem("clavis_quick_unlock_pin");
+      setShowRecovery(false);
+    } catch (err: any) {
+      const nextAttempts = recoveryAttempts + 1;
+      setRecoveryAttempts(nextAttempts);
+      if (nextAttempts >= 3) {
+        setRecoveryError("Recovery locked due to too many failed attempts. Please restart the application to try again.");
+      } else {
+        setRecoveryError(`Incorrect security answers (${nextAttempts}/3 attempts).`);
+      }
+    }
+  };
 
   // Tab State
   const [activeTab, setActiveTab] = useState<"fingerprint" | "pin" | "password">(() => {
@@ -193,6 +315,10 @@ export default function Unlock() {
     }
   };
 
+  if (showRecovery) {
+    return <ForgotPassword onBackToLogin={() => setShowRecovery(false)} />;
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
       <style>{`
@@ -215,12 +341,12 @@ export default function Unlock() {
       `}</style>
 
       <div className="w-full max-w-sm">
-        {/* PassVault Logo & Subtitle */}
+        {/* Clavis Logo & Subtitle */}
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-purple text-white shadow-md shadow-purple/20">
             <ShieldCheck size={28} />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">PassVault</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Clavis</h1>
           <p className="mt-1 text-sm text-muted-foreground">Your vault is locked</p>
         </div>
 
@@ -417,16 +543,253 @@ export default function Unlock() {
               <div className="text-center pt-2">
                 <button
                   type="button"
-                  onClick={handleWipeVault}
-                  className="text-[10px] text-danger hover:text-danger/80 transition-colors font-medium cursor-pointer"
+                  onClick={() => setShowRecovery(true)}
+                  className="text-[10px] text-danger hover:underline transition-colors font-medium cursor-pointer"
                 >
-                  Forgot password? Wipe and reset vault
+                  Forgot password?
                 </button>
               </div>
             </form>
           )}
         </div>
       </div>
+
+      {showRecovery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs">
+          <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-5 shadow-2xl space-y-4 animate-scale-up text-foreground select-none">
+            <header className="flex justify-between items-center pb-2 border-b border-border/40">
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Vault Recovery</span>
+              <button 
+                onClick={() => {
+                  setShowRecovery(false);
+                  setRecoveryStep("hint");
+                  setRecoveryError(null);
+                  setRecAnswer1("");
+                  setRecAnswer2("");
+                  setNewPassword("");
+                  setNewPasswordConfirm("");
+                }}
+                className="text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            {recoveryStep === "hint" && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold">Password Hint</h3>
+                  <p className="text-xs text-muted-foreground leading-normal">
+                    Here is the hint you configured during setup:
+                  </p>
+                </div>
+
+                <div className="p-3 border border-border/80 bg-background/50 rounded-lg text-center font-medium text-xs text-purple">
+                  {passwordHintText ? `"${passwordHintText}"` : "No password hint configured."}
+                </div>
+
+                {recoveryError && (
+                  <p className="text-[10px] text-danger text-center bg-danger/10 border border-danger/20 p-1.5 rounded-md leading-normal">
+                    {recoveryError}
+                  </p>
+                )}
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <Button 
+                    onClick={handleLoadQuestions}
+                    disabled={recoveryError !== null && recoveryError.includes("legacy vault")}
+                    className="w-full bg-purple text-white text-xs font-semibold hover:bg-purple/90 h-9 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Recover using security questions
+                  </Button>
+                  <button
+                    onClick={handleWipeVault}
+                    className="text-[10px] text-danger hover:underline transition-colors py-1 cursor-pointer font-medium"
+                  >
+                    Wipe and reset vault (Deletes all credentials)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {recoveryStep === "questions" && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold">Verify Security Questions</h3>
+                  <p className="text-xs text-muted-foreground leading-normal">
+                    Provide the answers to the security questions you configured during setup.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-muted-foreground uppercase block truncate max-w-full">
+                      {SECURITY_QUESTIONS.find(q => q.id === recoveryQuestions[0])?.text || "Question 1"}
+                    </label>
+                    <Input 
+                      type="text" 
+                      placeholder="Answer 1"
+                      value={recAnswer1}
+                      onChange={e => setRecAnswer1(e.target.value)}
+                      disabled={recoveryAttempts >= 3}
+                      className="text-xs h-8 bg-card/20"
+                      autoFocus
+                    />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-muted-foreground uppercase block truncate max-w-full">
+                      {SECURITY_QUESTIONS.find(q => q.id === recoveryQuestions[1])?.text || "Question 2"}
+                    </label>
+                    <Input 
+                      type="text" 
+                      placeholder="Answer 2"
+                      value={recAnswer2}
+                      onChange={e => setRecAnswer2(e.target.value)}
+                      disabled={recoveryAttempts >= 3}
+                      className="text-xs h-8 bg-card/20"
+                    />
+                  </div>
+                </div>
+
+                {recoveryError && (
+                  <p className="text-[10px] text-danger text-center bg-danger/10 border border-danger/20 p-1.5 rounded-md leading-normal">
+                    {recoveryError}
+                  </p>
+                )}
+
+                <div className="flex justify-between items-center pt-2">
+                  <button 
+                    onClick={() => {
+                      setRecoveryStep("hint");
+                      setRecoveryError(null);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <Button 
+                    onClick={handleVerifyQuestions}
+                    disabled={recoveryAttempts >= 3 || !recAnswer1.trim() || !recAnswer2.trim()}
+                    className="bg-purple text-white text-xs font-semibold hover:bg-purple/90 h-8.5 px-4 rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Continue
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {recoveryStep === "reset" && (() => {
+              const entropy = calculateEntropy(newPassword);
+              const requirements = {
+                length: newPassword.length >= 12,
+                upper: /[A-Z]/.test(newPassword),
+                lower: /[a-z]/.test(newPassword),
+                number: /[0-9]/.test(newPassword),
+                symbol: /[^a-zA-Z0-9]/.test(newPassword),
+              };
+              const isPasswordValid = Object.values(requirements).every(Boolean) && entropy >= 60;
+              
+              return (
+                <form onSubmit={handlePerformRecovery} className="space-y-3 animate-fade-in">
+                  <div className="space-y-0.5">
+                    <h3 className="text-sm font-semibold">Reset Master Password</h3>
+                    <p className="text-[10px] text-muted-foreground leading-normal">
+                      Must be 12+ chars, with uppercase, digit, and symbol.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <Input 
+                        type={showNewPw ? "text" : "password"} 
+                        placeholder="New master password"
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        disabled={recoveryAttempts >= 3}
+                        className="text-xs h-7.5 bg-card/20 pr-8"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPw(s => !s)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showNewPw ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    </div>
+                    
+                    <RecoveryStrengthBar password={newPassword} />
+
+                    <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[7.5px] text-muted-foreground leading-none justify-center pt-0.5">
+                      {[
+                        ["12+ chars", requirements.length],
+                        ["Uppercase", requirements.upper],
+                        ["Lowercase", requirements.lower],
+                        ["Number", requirements.number],
+                        ["Symbol", requirements.symbol],
+                      ].map(([label, ok]) => (
+                        <span key={label as string} className={cn("flex items-center gap-0.5 transition-colors", ok ? "text-teal font-bold" : "text-muted-foreground")}>
+                          <Check size={7} className={cn("transition-opacity", ok ? "opacity-100" : "opacity-35")} />
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="relative">
+                      <Input 
+                        type={showNewPwConfirm ? "text" : "password"} 
+                        placeholder="Confirm new password"
+                        value={newPasswordConfirm}
+                        onChange={e => setNewPasswordConfirm(e.target.value)}
+                        disabled={recoveryAttempts >= 3}
+                        className="text-xs h-7.5 bg-card/20 pr-8"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPwConfirm(s => !s)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showNewPwConfirm ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                    </div>
+                    
+                    {newPasswordConfirm && newPasswordConfirm !== newPassword && (
+                      <p className="text-[8px] text-danger text-center leading-none">Passwords do not match</p>
+                    )}
+                  </div>
+
+                  {recoveryError && (
+                    <p className="text-[10px] text-danger text-center bg-danger/10 border border-danger/20 p-1.5 rounded-md leading-normal">
+                      {recoveryError}
+                    </p>
+                  )}
+
+                  <div className="flex justify-between items-center pt-1">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setRecoveryStep("questions");
+                        setRecoveryError(null);
+                      }}
+                      className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      Back
+                    </button>
+                    <Button 
+                      type="submit"
+                      disabled={loading || recoveryAttempts >= 3 || !isPasswordValid || newPassword !== newPasswordConfirm}
+                      className="bg-purple text-white text-xs font-semibold hover:bg-purple/90 h-8 px-4 rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {loading ? "Recovering..." : "Reset & Unlock"}
+                    </Button>
+                  </div>
+                </form>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

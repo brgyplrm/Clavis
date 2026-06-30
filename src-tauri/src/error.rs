@@ -1,4 +1,3 @@
-
 use serde::{Serialize, Serializer};
 use thiserror::Error;
 
@@ -36,6 +35,9 @@ pub enum Error {
 
     #[error("Migration error: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
+
+    #[error("Tauri error: {0}")]
+    Tauri(#[from] tauri::Error),
 }
 
 // Convert the error into a serialized string for Tauri's IPC bridge
@@ -49,6 +51,19 @@ impl Serialize for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub trait MutexExt<T> {
+    fn lock_safe(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> MutexExt<T> for std::sync::Mutex<T> {
+    fn lock_safe(&self) -> std::sync::MutexGuard<'_, T> {
+        match self.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
 
 // Register this module in lib.rs by adding at the top:
 //  pub mod error;

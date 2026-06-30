@@ -1,4 +1,5 @@
 declare const chrome: any;
+declare const browser: any;
 declare function importScripts(...urls: string[]): void;
 declare function ensureConnected(): Promise<boolean>;
 declare function sendWsMessage(payload: any): Promise<any>;

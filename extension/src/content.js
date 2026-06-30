@@ -692,8 +692,7 @@ function showSaveBanner(pending) {
     bannerDiv.id = "clavis-save-banner-root";
     bannerDiv.style.position = "fixed";
     bannerDiv.style.top = "16px";
-    bannerDiv.style.left = "50%";
-    bannerDiv.style.transform = "translateX(-50%)";
+    bannerDiv.style.right = "16px";
     bannerDiv.style.zIndex = "2147483647";
     bannerDiv.style.pointerEvents = "none";
     document.body.appendChild(bannerDiv);
@@ -705,60 +704,154 @@ function showSaveBanner(pending) {
     bannerDiv.addEventListener("pointerup", stopPropagation);
     bannerDiv.addEventListener("click", stopPropagation);
     const shadow = bannerDiv.attachShadow({ mode: "open" });
+    const rawHost = pending.hostname.replace("www.", "");
+    const parts = rawHost.split(".");
+    let formattedTitle = rawHost;
+    if (parts.length >= 2) {
+        const tldList = ["co", "com", "org", "net", "gov", "edu", "ac", "sch"];
+        let index = parts.length - 2;
+        if (tldList.includes(parts[index]) && parts.length >= 3) {
+            index = parts.length - 3;
+        }
+        const base = parts[index];
+        formattedTitle = base.charAt(0).toUpperCase() + base.slice(1);
+    }
+    else {
+        formattedTitle = rawHost.charAt(0).toUpperCase() + rawHost.slice(1);
+    }
     shadow.innerHTML = `
     <style>
       .clavis-banner {
-        background: rgba(30, 30, 46, 0.95);
-        backdrop-filter: blur(10px);
+        background: rgba(18, 18, 28, 0.96);
+        backdrop-filter: blur(12px);
         color: #cdd6f4;
-        border: 1px solid rgba(137, 180, 250, 0.3);
+        border: 1px solid rgba(137, 180, 250, 0.25);
         border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        padding: 12px 20px;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+        padding: 16px;
         display: flex;
-        align-items: center;
-        gap: 16px;
+        flex-direction: column;
+        gap: 12px;
         font-family: system-ui, -apple-system, sans-serif;
         font-size: 13px;
         pointer-events: auto;
-        animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        max-width: 480px;
-        width: max-content;
+        animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        width: 320px;
         box-sizing: border-box;
       }
-      @keyframes slideDown {
-        from { transform: translateY(-40px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
+      @keyframes slideIn {
+        from { transform: translateX(50px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
       }
-      .clavis-logo {
-        font-size: 18px;
-      }
-      .clavis-text {
+      .header {
         display: flex;
-        flex-direction: column;
-        gap: 2px;
-        flex-grow: 1;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding-bottom: 8px;
       }
-      .clavis-title {
-        font-weight: 700;
-        color: #89b4fa;
-      }
-      .clavis-details {
-        font-size: 11px;
-        color: #a6adc8;
-      }
-      .clavis-buttons {
+      .header-title-block {
         display: flex;
+        align-items: center;
         gap: 8px;
       }
-      button {
+      .logo {
+        font-size: 16px;
+      }
+      .title {
+        font-weight: 700;
+        color: #89b4fa;
+        font-size: 14px;
+      }
+      .close-btn {
+        background: transparent;
+        border: none;
+        color: #a6adc8;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 2px;
+        border-radius: 4px;
+        transition: all 0.15s ease;
+      }
+      .close-btn:hover {
+        color: #f38ba8;
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: #a6adc8;
+        letter-spacing: 0.5px;
+      }
+      input {
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(137, 180, 250, 0.2);
+        border-radius: 6px;
+        color: #cdd6f4;
+        padding: 6px 10px;
+        font-size: 12px;
+        outline: none;
+        transition: all 0.15s ease;
+        font-family: inherit;
+        box-sizing: border-box;
+        width: 100%;
+      }
+      input:focus {
+        border-color: #cba6f7;
+        box-shadow: 0 0 0 2px rgba(203, 166, 247, 0.2);
+      }
+      .password-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .password-wrapper input {
+        padding-right: 32px;
+      }
+      .toggle-btn {
+        position: absolute;
+        right: 6px;
+        background: transparent;
+        border: none;
+        color: #a6adc8;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .toggle-btn:hover {
+        color: #cdd6f4;
+      }
+      .footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      button.btn-action {
         border: none;
         border-radius: 6px;
-        padding: 6px 12px;
+        padding: 6px 14px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.15s ease;
+        font-family: inherit;
       }
       .btn-save {
         background: linear-gradient(135deg, #cba6f7 0%, #89b4fa 100%);
@@ -776,81 +869,228 @@ function showSaveBanner(pending) {
       .btn-cancel:hover {
         background: #45475a;
       }
+      .progress-container {
+        width: 100%;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 4px;
+      }
+      .progress-bar {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #cba6f7, #89b4fa);
+        border-radius: 2px;
+        transition: width 0.1s linear;
+      }
     </style>
-    <div class="clavis-banner">
-      <span class="clavis-logo">🗝️</span>
-      <div class="clavis-text">
-        <span class="clavis-title">Save to Clavis?</span>
-        <span class="clavis-details">Save password for <strong>${pending.username}</strong> on this site?</span>
+    <div class="clavis-banner" id="clavis-banner">
+      <div class="header">
+        <div class="header-title-block">
+          <span class="logo">🗝️</span>
+          <span class="title">Save to Clavis?</span>
+        </div>
+        <button class="close-btn" id="btn-close" aria-label="Close">✕</button>
       </div>
-      <div class="clavis-buttons">
-        <button class="btn-cancel" id="btn-cancel">No thanks</button>
-        <button class="btn-save" id="btn-save">Save</button>
+      
+      <div class="body">
+        <div class="field">
+          <label for="input-title">Site / Title</label>
+          <input type="text" id="input-title" value="${formattedTitle}" />
+        </div>
+        <div class="field">
+          <label for="input-username">Username</label>
+          <input type="text" id="input-username" value="${pending.username}" />
+        </div>
+        <div class="field">
+          <label for="input-password">Password</label>
+          <div class="password-wrapper">
+            <input type="password" id="input-password" value="${pending.password}" />
+            <button class="toggle-btn" id="btn-toggle" type="button">👁️</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <button class="btn-action btn-cancel" id="btn-cancel">Dismiss</button>
+        <button class="btn-action btn-save" id="btn-save">Save</button>
+      </div>
+
+      <div class="progress-container">
+        <div class="progress-bar" id="progress-bar"></div>
       </div>
     </div>
   `;
+    const btnClose = shadow.getElementById("btn-close");
     const btnCancel = shadow.getElementById("btn-cancel");
     const btnSave = shadow.getElementById("btn-save");
-    btnCancel.addEventListener("click", () => {
+    const btnToggle = shadow.getElementById("btn-toggle");
+    const inputPassword = shadow.getElementById("input-password");
+    const inputTitle = shadow.getElementById("input-title");
+    const inputUsername = shadow.getElementById("input-username");
+    const progressBar = shadow.getElementById("progress-bar");
+    let timeLeft = 30.0;
+    let paused = false;
+    const cleanup = () => {
+        clearInterval(timer);
+        window.removeEventListener("keydown", handleKeyDown);
         bannerDiv.remove();
-    });
-    btnSave.addEventListener("click", () => {
-        console.log("[Clavis Content Script] Save button clicked. Preparing to send create_entry message.");
-        btnSave.textContent = "Saving...";
-        btnSave.disabled = true;
-        btnCancel.disabled = true;
-        const rawHost = pending.hostname.replace("www.", "");
-        const parts = rawHost.split(".");
-        let formattedTitle = rawHost;
-        if (parts.length >= 2) {
-            const tldList = ["co", "com", "org", "net", "gov", "edu", "ac", "sch"];
-            let index = parts.length - 2;
-            if (tldList.includes(parts[index]) && parts.length >= 3) {
-                index = parts.length - 3;
-            }
-            const base = parts[index];
-            formattedTitle = base.charAt(0).toUpperCase() + base.slice(1);
+    };
+    const handleKeyDown = (e) => {
+        if (e.key === "Escape") {
+            cleanup();
         }
-        else {
-            formattedTitle = rawHost.charAt(0).toUpperCase() + rawHost.slice(1);
-        }
-        const payload = {
-            type: "create_entry",
-            title: formattedTitle,
-            username: pending.username,
-            password: pending.password
-        };
-        console.log("[Clavis Content Script] Sending message to background:", payload);
-        chrome.runtime.sendMessage(payload, (response) => {
-            const err = chrome.runtime.lastError;
-            console.log("[Clavis Content Script] Received response from background:", response, "Error:", err);
-            if (err || !response || !response.success) {
-                console.error("[Clavis Content Script] Failed to save entry:", err || response?.error);
-                btnSave.textContent = "Error";
-                btnSave.style.background = "#f38ba8";
-                setTimeout(() => bannerDiv.remove(), 2000);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    const timer = setInterval(() => {
+        if (!paused) {
+            timeLeft -= 0.1;
+            const pct = (timeLeft / 30.0) * 100;
+            progressBar.style.width = `${pct}%`;
+            if (timeLeft <= 0) {
+                cleanup();
             }
-            else {
-                console.log("[Clavis Content Script] Entry saved successfully!");
-                btnSave.textContent = "Saved!";
-                btnSave.style.background = "#a6e3a1";
-                setTimeout(() => bannerDiv.remove(), 1500);
+        }
+    }, 100);
+    // Pause countdown timer on hover/interaction/focus
+    const pauseTimer = () => { paused = true; };
+    const resumeTimer = () => { paused = false; };
+    bannerDiv.addEventListener("mouseenter", pauseTimer);
+    bannerDiv.addEventListener("mouseleave", resumeTimer);
+    [inputTitle, inputUsername, inputPassword].forEach(input => {
+        input.addEventListener("focus", pauseTimer);
+        input.addEventListener("blur", resumeTimer);
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                saveAction();
             }
         });
     });
+    btnToggle.addEventListener("click", () => {
+        if (inputPassword.type === "password") {
+            inputPassword.type = "text";
+            btnToggle.textContent = "🙈";
+        }
+        else {
+            inputPassword.type = "password";
+            btnToggle.textContent = "👁️";
+        }
+    });
+    const saveAction = () => {
+        const title = inputTitle.value.trim();
+        const username = inputUsername.value.trim();
+        const password = inputPassword.value;
+        if (!title || !password)
+            return;
+        btnSave.textContent = "Saving...";
+        btnSave.disabled = true;
+        btnCancel.disabled = true;
+        btnClose.disabled = true;
+        const payload = {
+            type: "save_credential",
+            title,
+            username: username || null,
+            password
+        };
+        chrome.runtime.sendMessage(payload, (response) => {
+            const err = chrome.runtime.lastError;
+            if (err || !response || !response.success) {
+                btnSave.textContent = "Error";
+                btnSave.style.background = "#f38ba8";
+                setTimeout(cleanup, 2000);
+            }
+            else {
+                btnSave.textContent = "Saved!";
+                btnSave.style.background = "#a6e3a1";
+                setTimeout(cleanup, 1500);
+            }
+        });
+    };
+    btnSave.addEventListener("click", saveAction);
+    btnCancel.addEventListener("click", cleanup);
+    btnClose.addEventListener("click", cleanup);
+}
+function isBlockedDomain(callback) {
+    chrome.runtime.sendMessage({ type: "get_blocklist" }, (response) => {
+        const err = chrome.runtime.lastError;
+        if (err || !response || !response.success || !response.domains) {
+            callback(false);
+            return;
+        }
+        const currentHost = window.location.hostname.toLowerCase().replace("www.", "");
+        const blocked = response.domains.some((blockedDomain) => {
+            const cleanBlocked = blockedDomain.toLowerCase().replace("www.", "");
+            return currentHost === cleanBlocked || currentHost.endsWith("." + cleanBlocked);
+        });
+        callback(blocked);
+    });
+}
+function detectRegistrationForm(container = document.body) {
+    const passwordInputs = findInputsInShadow(container).filter(input => input.type === "password");
+    if (passwordInputs.length >= 2) {
+        return true;
+    }
+    const formText = container.innerText?.toLowerCase() || "";
+    const registrationKeywords = ["confirm password", "repeat password", "re-enter password", "create account", "register", "sign up", "sign-up"];
+    for (const kw of registrationKeywords) {
+        if (formText.includes(kw)) {
+            return true;
+        }
+    }
+    const inputs = findInputsInShadow(container);
+    for (const input of inputs) {
+        const id = (input.id || "").toLowerCase();
+        const name = (input.name || "").toLowerCase();
+        const placeholder = (input.placeholder || "").toLowerCase();
+        const aria = (input.getAttribute("aria-label") || "").toLowerCase();
+        if (id.includes("confirm") || name.includes("confirm") || placeholder.includes("confirm") || aria.includes("confirm") ||
+            id.includes("register") || name.includes("register") || id.includes("signup") || name.includes("signup")) {
+            return true;
+        }
+    }
+    return false;
+}
+function isLoginSequence(container) {
+    const inputs = findInputsInShadow(container).filter(isElementVisible);
+    const passwordFields = inputs.filter(input => input.type === "password");
+    if (passwordFields.length === 1) {
+        const usernameTypes = ["text", "email", "tel", "url"];
+        const usernameFields = inputs.filter(input => {
+            const type = (input.getAttribute("type") || "text").toLowerCase();
+            return usernameTypes.includes(type) && input.type !== "password";
+        });
+        if (usernameFields.length <= 2 && !detectRegistrationForm(container)) {
+            return true;
+        }
+    }
+    return false;
 }
 function init() {
     console.log("[Clavis Content Script] Initializing content script for:", window.location.href);
     initGlobalClickBlockers();
-    checkPendingSave();
-    checkForPasswordFields();
-    setupSubmitCapture();
+    isBlockedDomain((blocked) => {
+        if (blocked) {
+            console.log("[Clavis Content Script] Domain is blocklisted. Disabling save prompts.");
+            checkForPasswordFields();
+            return;
+        }
+        checkPendingSave();
+        checkForPasswordFields();
+        setupSubmitCapture();
+    });
     if (document.body) {
         const observer = new MutationObserver(() => {
-            console.log("[Clavis Content Script] Mutation detected, scheduling re-check in 500ms.");
             if (timeoutId)
                 clearTimeout(timeoutId);
-            timeoutId = setTimeout(checkForPasswordFields, 500);
+            timeoutId = setTimeout(() => {
+                isBlockedDomain((blocked) => {
+                    if (!blocked) {
+                        checkForPasswordFields();
+                    }
+                });
+            }, 500);
         });
         observer.observe(document.body, {
             childList: true,

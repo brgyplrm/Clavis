@@ -1,6 +1,20 @@
 export interface LogRow {
   timestamp: string;
-  event: "Unlocked" | "Viewed" | "Copied" | "Failed unlock" | "Entry added" | "Entry deleted";
+  event: 
+    | "Unlocked" 
+    | "Viewed" 
+    | "Copied" 
+    | "Failed unlock" 
+    | "Entry added" 
+    | "Entry deleted"
+    | "Imported"
+    | "Backup created"
+    | "Backup restored"
+    | "Password changed"
+    | "Setting changed"
+    | "Blocklist modified"
+    | "Quick unlock set"
+    | "Quick unlock disabled";
   entry: string;
   details: string;
 }

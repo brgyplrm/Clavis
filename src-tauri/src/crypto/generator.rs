@@ -1,5 +1,5 @@
-use ring::rand::{SecureRandom, SystemRandom};
 use crate::error::{Error, Result};
+use ring::rand::{SecureRandom, SystemRandom};
 
 /// Generates a strong, random password using ring::rand::SystemRandom (CSPRNG).
 /// Implements rejection sampling to eliminate modulo bias.
@@ -12,7 +12,9 @@ pub fn generate_password(
     symbols: bool,
 ) -> Result<String> {
     if length < 8 || length > 64 {
-        return Err(Error::Crypto("Length must be between 8 and 64 characters".to_string()));
+        return Err(Error::Crypto(
+            "Length must be between 8 and 64 characters".to_string(),
+        ));
     }
 
     let mut pool = String::new();
@@ -30,7 +32,9 @@ pub fn generate_password(
     }
 
     if pool.is_empty() {
-        return Err(Error::Crypto("At least one character set must be selected".to_string()));
+        return Err(Error::Crypto(
+            "At least one character set must be selected".to_string(),
+        ));
     }
 
     let pool_bytes = pool.as_bytes();
@@ -46,7 +50,7 @@ pub fn generate_password(
     while password.len() < length {
         rng.fill(&mut random_byte)
             .map_err(|_| Error::Crypto("Failed to generate secure random byte".to_string()))?;
-        
+
         let byte = random_byte[0] as usize;
         if byte < limit {
             let index = byte % set_size;
@@ -94,4 +98,3 @@ mod tests {
         }
     }
 }
-

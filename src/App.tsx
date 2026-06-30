@@ -1,22 +1,26 @@
 import { useEffect, useState } from "react";
 import { useVaultStore } from "./hooks/useVaultStore";
 import Setup from "./pages/Setup";
+import Eula from "./pages/onboarding/Eula";
 import Unlock from "./pages/Unlock";
 import Dashboard from "./pages/Dashboard";
 import Security from "./pages/Security";
 import Authenticator from "./pages/Authenticator";
 import ActivityLog from "./pages/ActivityLog";
 import Settings from "./pages/Settings";
+import Help from "./pages/Help";
+import OnboardingTour from "./components/OnboardingTour";
+import AutotypePicker from "./components/AutotypePicker";
 import { 
   LayoutList, ShieldAlert, Clock, ScrollText, Settings as SettingsIcon, 
-  Lock, ShieldCheck, Sun, Moon 
+  Lock, ShieldCheck, Sun, Moon, X, HelpCircle
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import "./index.css";
 import * as tauri from "./lib/tauri";
 (window as any).tauri = tauri;
 
-type PageView = "dashboard" | "security" | "authenticator" | "activity" | "settings";
+type PageView = "dashboard" | "security" | "authenticator" | "activity" | "settings" | "help";
 
 function App() {
   const {
@@ -26,6 +30,11 @@ function App() {
     lock,
     clipboardCountdown,
     clearClipboardCountdown,
+    toasts,
+    removeToast,
+    theme,
+    currentView,
+    setCurrentView
   } = useVaultStore();
 
   const [checking, setChecking] = useState(true);
@@ -33,9 +42,33 @@ function App() {
   const [startedSetup, setStartedSetup] = useState(false);
 
   // Router view state
-  const [currentView, setCurrentView] = useState<PageView>("dashboard");
   const [isDark, setIsDark] = useState(true);
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
+  const [showTour, setShowTour] = useState(false);
+  const [eulaAccepted, setEulaAccepted] = useState(false);
+
+  useEffect(() => {
+    if (!isLocked) {
+      tauri.getSetting("tour_completed")
+        .then(val => {
+          if (val !== "true") {
+            setShowTour(true);
+          }
+        })
+        .catch(() => {
+          setShowTour(true);
+        });
+    }
+  }, [isLocked]);
+
+  const handleTourClose = async () => {
+    setShowTour(false);
+    try {
+      await tauri.setSetting("tour_completed", "true");
+    } catch (err) {
+      console.error("Failed to save tour completion status:", err);
+    }
+  };
 
   // Setup auto-lock idle timeout and focus lost event listeners
         useEffect(() => {
@@ -116,8 +149,39 @@ function App() {
 
   // Handle Theme Toggle
   useEffect(() => {
+    if (theme === "Dark") {
+      setIsDark(true);
+    } else if (theme === "Light") {
+      setIsDark(false);
+    } else {
+      // System
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      setIsDark(mediaQuery.matches);
+      const handler = (e: MediaQueryListEvent) => {
+        setIsDark(e.matches);
+      };
+      mediaQuery.addEventListener("change", handler);
+      return () => mediaQuery.removeEventListener("change", handler);
+    }
+  }, [theme]);
+
+  useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
+
+  const [windowName, setWindowName] = useState<string>("");
+
+  useEffect(() => {
+    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+      setWindowName(getCurrentWindow().label);
+    }).catch(err => {
+      console.error("Failed to fetch window label:", err);
+    });
+  }, []);
+
+  if (windowName === "autotype_picker") {
+    return <AutotypePicker />;
+  }
 
   if (checking) {
     return (
@@ -132,6 +196,9 @@ function App() {
 
   // If not initialized yet and setup is not marked complete, show the setup screen
   if (startedSetup && !setupFinished) {
+    if (!eulaAccepted) {
+      return <Eula onAccept={() => setEulaAccepted(true)} />;
+    }
     return <Setup onComplete={() => setSetupFinished(true)} />;
   }
 
@@ -166,7 +233,9 @@ function App() {
       case "activity":
         return <ActivityLog />;
       case "settings":
-        return <Settings />;
+        return <Settings onReplayTour={() => { setCurrentView("dashboard"); setShowTour(true); }} />;
+      case "help":
+        return <Help />;
     }
   };
 
@@ -215,8 +284,23 @@ function App() {
             {isDark ? <Sun size={17} /> : <Moon size={17} />}
           </button>
 
+          {/* Help button */}
+          <button
+            onClick={() => setCurrentView("help")}
+            title="Help Center"
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200",
+              currentView === "help" 
+                ? "bg-purple-soft text-purple" 
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <HelpCircle size={17} />
+          </button>
+
           {/* Settings button */}
           <button
+            id="tour-settings"
             onClick={() => setCurrentView("settings")}
             title="Settings"
             className={cn(
@@ -231,6 +315,7 @@ function App() {
 
           {/* Red Lock Vault Button */}
           <button
+            id="tour-lock"
             onClick={() => setLockConfirmOpen(true)}
             title="Lock Vault"
             className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
@@ -266,6 +351,7 @@ function App() {
             </button>
           </div>
         )}
+        
       </main>
 
       {/* LOCK VAULT CONFIRMATION DIALOG (Modal 5) */}
@@ -301,6 +387,46 @@ function App() {
         </div>
       )}
 
+      {/* Toast Notifications Overlay Container */}
+      <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2.5 max-w-sm pointer-events-none">
+        {toasts.map(toast => {
+          const typeClasses = {
+            success: "bg-teal border-teal/20 text-white shadow-teal/10",
+            info: "bg-blue-500 border-blue-500/20 text-white shadow-blue-500/10",
+            warning: "bg-amber border-amber/20 text-white shadow-amber/10",
+            error: "bg-danger border-danger/20 text-white shadow-danger/10"
+          };
+
+          return (
+            <div 
+              key={toast.id}
+              className={cn(
+                "pointer-events-auto flex flex-col border rounded-xl p-3 shadow-lg select-text min-w-[240px] animate-fade-in",
+                typeClasses[toast.type]
+              )}
+            >
+              <div className="flex justify-between items-start">
+                <span className="font-bold text-[11px] uppercase tracking-wide">{toast.title}</span>
+                <button 
+                  onClick={() => removeToast(toast.id)} 
+                  className="hover:opacity-75 transition-opacity ml-2 shrink-0 cursor-pointer bg-transparent border-0 text-white"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              <p className="text-[10px] opacity-90 mt-1 leading-normal select-text">{toast.message}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {showTour && (
+        <OnboardingTour
+          currentView={currentView}
+          onChangeView={setCurrentView}
+          onClose={handleTourClose}
+        />
+      )}
     </div>
   );
 }

@@ -1,8 +1,8 @@
-use sha1::{Digest, Sha1};
-use zeroize::Zeroizing;
 use crate::error::{Error, Result};
+use sha1::{Digest, Sha1};
 use std::fs;
 use tauri::{AppHandle, Manager};
+use zeroize::Zeroizing;
 
 #[derive(serde::Serialize)]
 pub struct BreachCheckResponse {
@@ -34,22 +34,27 @@ pub async fn check_password_breached(password: String) -> Result<BreachCheckResp
 
     // 2. Fetch hashes sharing the prefix from HIBP API (using rustls-tls for HTTPS)
     let url = format!("https://api.pwnedpasswords.com/range/{}", prefix);
-    
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| Error::Breach(format!("Failed to build client: {}", e)))?;
 
-    let response = client.get(&url)
+    let response = client
+        .get(&url)
         .send()
         .await
         .map_err(|e| Error::Breach(format!("API request failed: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err(Error::Breach(format!("API returned status: {}", response.status())));
+        return Err(Error::Breach(format!(
+            "API returned status: {}",
+            response.status()
+        )));
     }
 
-    let body = response.text()
+    let body = response
+        .text()
         .await
         .map_err(|e| Error::Breach(format!("Failed to read response body: {}", e)))?;
 
@@ -88,17 +93,22 @@ pub async fn update_breaches_cache(app_handle: AppHandle) -> Result<String> {
         .build()
         .map_err(|e| Error::Breach(format!("Failed to build client: {}", e)))?;
 
-    let response = client.get(url)
+    let response = client
+        .get(url)
         .header("User-Agent", "Clavis Password Manager")
         .send()
         .await
         .map_err(|e| Error::Breach(format!("Failed to fetch breaches: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err(Error::Breach(format!("API returned status: {}", response.status())));
+        return Err(Error::Breach(format!(
+            "API returned status: {}",
+            response.status()
+        )));
     }
 
-    let text = response.text()
+    let text = response
+        .text()
         .await
         .map_err(|e| Error::Breach(format!("Failed to read body: {}", e)))?;
 

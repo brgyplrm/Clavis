@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { 
   ShieldAlert, RefreshCw, BarChart, Globe, Smartphone, Clock, BarChart2, 
   ChevronDown, ChevronUp, Check 
@@ -7,7 +7,9 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { avatarColor, initials } from "./Dashboard";
 import { useVaultStore } from "../hooks/useVaultStore";
-import { EntrySummary } from "../lib/tauri";
+import { EntrySummary, getEntry, checkPasswordBreached } from "../lib/tauri";
+import { scorePassword } from "../lib/passwordStrength";
+import PageHelp from "../components/ui/PageHelp";
 
 interface ReportItem {
   id: string;
@@ -39,8 +41,15 @@ const getDaysAgo = (updatedAt: number) => {
   return Math.max(0, Math.floor(diffSec / (24 * 3600)));
 };
 
+async function sha256(message: string) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export default function Security() {
-  const { entries } = useVaultStore();
+  const { entries, setSelectedEntryId, setCurrentView } = useVaultStore();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [lastScanned, setLastScanned] = useState<string>(() => new Date().toLocaleString());
   const [scanning, setScanning] = useState(false);
@@ -52,12 +61,15 @@ export default function Security() {
     const urlMap = JSON.parse(localStorage.getItem("clavis_urls") || "{}");
 
     // Exposed
-    const exposedItems = entries.filter((e: EntrySummary) => breachedMap[e.id]).map((e: EntrySummary) => ({
-      id: e.id,
-      title: e.title,
-      username: e.username || "No username",
-      badgeText: "seen in known data leaks"
-    }));
+    const exposedItems = entries.filter((e: EntrySummary) => breachedMap[e.id]).map((e: EntrySummary) => {
+      const count = breachedMap[e.id];
+      return {
+        id: e.id,
+        title: e.title,
+        username: e.username || "No username",
+        badgeText: typeof count === "number" ? `Seen in ${count.toLocaleString()} known data leaks` : "seen in known data leaks"
+      };
+    });
 
     // Reused
     const reusedItems = entries.filter((e: EntrySummary) => {
@@ -198,30 +210,84 @@ export default function Security() {
     }));
   };
 
-  const handleRunChecks = () => {
+  const runSecurityScan = async () => {
     setScanning(true);
-    setTimeout(() => {
+    try {
+      const breachedMap: Record<string, number> = {};
+      const scoreMap: Record<string, number> = {};
+      const hashMap: Record<string, string> = {};
+      const urlMap: Record<string, string> = {};
+
+      for (const e of entries) {
+        try {
+          const decrypted = await getEntry(e.id);
+          
+          // 1. Password strength score
+          const { score } = scorePassword(decrypted.password);
+          scoreMap[e.id] = score;
+
+          // 2. Check if pwned/breached
+          const breachRes = await checkPasswordBreached(decrypted.password);
+          if (breachRes.count > 0) {
+            breachedMap[e.id] = breachRes.count;
+          }
+
+          // 3. Password fingerprint hash
+          const hash = await sha256(decrypted.password);
+          hashMap[e.id] = hash;
+
+          // 4. URL mapping
+          const url = decrypted.title.includes("://") ? decrypted.title : "https://" + decrypted.title;
+          urlMap[e.id] = url;
+        } catch (err) {
+          console.error(`Failed to scan entry ${e.id}:`, err);
+        }
+      }
+
+      localStorage.setItem("clavis_password_breached", JSON.stringify(breachedMap));
+      localStorage.setItem("clavis_password_scores", JSON.stringify(scoreMap));
+      localStorage.setItem("clavis_password_hashes", JSON.stringify(hashMap));
+      localStorage.setItem("clavis_urls", JSON.stringify(urlMap));
+
+      const now = new Date().toLocaleString();
+      localStorage.setItem("clavis_last_scan_time", now);
+      setLastScanned(now);
+      
+    } catch (error: any) {
+      console.error("Scan error", error);
+    } finally {
       setScanning(false);
-      setLastScanned(new Date().toLocaleString());
-    }, 1200);
+    }
   };
 
+  useEffect(() => {
+    if (entries.length > 0 && !localStorage.getItem("clavis_password_scores")) {
+      runSecurityScan();
+    }
+  }, [entries]);
+
   return (
-    <div className="flex h-screen flex-1 flex-col min-w-0 bg-background text-foreground overflow-y-auto">
+    <div className="flex h-screen flex-1 flex-col min-w-0 bg-background text-foreground overflow-y-auto select-none">
       {/* Top Bar */}
       <header className="flex items-center justify-between border-b border-border px-6 py-4 shrink-0">
-        <h1 className="text-sm font-semibold">Security</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-sm font-semibold">Security</h1>
+          <PageHelp 
+            title="Security Reports"
+            description="Automatic analysis of your vault for potential vulnerabilities."
+          />
+        </div>
         <Button 
-          onClick={handleRunChecks}
+          onClick={runSecurityScan}
           disabled={scanning}
-          className="h-8 text-xs bg-purple text-white hover:bg-purple/90"
+          className="h-8 text-xs bg-purple text-white hover:bg-purple/90 font-semibold"
         >
           {scanning ? "Running checks..." : "Run all checks"}
         </Button>
       </header>
 
       <div className="flex-1 p-6 space-y-6">
-        {/* Stat Cards - Horizontal Row */}
+        {/* Stat Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           {sectionsData.map((sec: ReportSection) => {
             const Icon = sec.icon;
@@ -287,15 +353,18 @@ export default function Security() {
                         </div>
 
                         {/* Muted label details */}
-                        <div className="text-[10px] text-muted-foreground font-medium px-4">
+                        <div className="text-[10px] text-muted-foreground font-medium px-4 text-right">
                           {item.badgeText}
                         </div>
 
                         <Button 
                           size="sm" 
                           variant="outline"
-                          className="h-7 text-[10px] shrink-0 border-purple/30 text-purple hover:bg-purple-soft"
-                          onClick={() => alert(`Redirect to update ${item.title} password`)}
+                          className="h-7 text-[10px] shrink-0 border-purple/30 text-purple hover:bg-purple-soft font-semibold"
+                          onClick={() => {
+                            setSelectedEntryId(item.id);
+                            setCurrentView("dashboard");
+                          }}
                         >
                           {sec.actionLabel}
                         </Button>

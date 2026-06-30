@@ -1,5 +1,9 @@
 import { useEffect, useState, useMemo, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { useVaultStore } from "../hooks/useVaultStore";
+import { useChecklist } from "./Help";
+import PageHelp from "../components/ui/PageHelp";
 import { getEntry, DecryptedEntry, EntrySummary, copyToClipboard, checkPasswordBreached, getCachedBreaches, updateBreachesCache, Breach } from "../lib/tauri";
 import { logEvent } from "../lib/activity";
 import TotpDisplay from "../components/TotpDisplay";
@@ -13,22 +17,15 @@ import {
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
-import { scorePassword } from "../lib/passwordStrength";
-
 // Types
 type Category = "FINANCE" | "SOCIAL" | "WORK" | "PERSONAL" | "OTHER";
 
+import PasswordStrengthMeter from "../components/PasswordStrengthMeter";
+import EmptyState from "../components/dashboard/EmptyState";
+
 // StrengthBar component
 export function StrengthBar({ password }: { password: string }) {
-  const { score } = scorePassword(password);
-  const colors = ["bg-border", "bg-danger", "bg-amber", "bg-teal", "bg-teal"];
-  return (
-    <div className="flex gap-1">
-      {[1, 2, 3, 4].map(i => (
-        <div key={i} className={cn("h-1.5 flex-1 rounded-full transition-colors duration-300", i <= score ? colors[score] : "bg-border/60")} />
-      ))}
-    </div>
-  );
+  return <PasswordStrengthMeter password={password} />;
 }
 
 // LocalStorage helpers for Category, Tags, Attachments, URL, and Notes
@@ -153,12 +150,16 @@ export default function Dashboard() {
     activeVault,
     createVault,
     deleteVault,
-    selectVault
+    selectVault,
+    selectedEntryId,
+    setSelectedEntryId,
+    showToast,
+    setCurrentView
   } = useVaultStore();
 
   // Search, Tags & Selection State
   const [query, setQuery] = useState("");
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const { completedCount: checklistCount, progressPercent: checklistProgress } = useChecklist();
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [filterDropdown, setFilterDropdown] = useState("all");
@@ -304,6 +305,15 @@ export default function Dashboard() {
 
   // Modals state
   const [addEntryOpen, setAddEntryOpen] = useState(false);
+  const [coachingActive, setCoachingActive] = useState(false);
+  useEffect(() => {
+    if (addEntryOpen && sessionStorage.getItem("clavis_coaching_active") === "true") {
+      setCoachingActive(true);
+    } else {
+      setCoachingActive(false);
+    }
+  }, [addEntryOpen]);
+
   const [editEntryOpen, setEditEntryOpen] = useState(false);
   const [deleteEntryOpen, setDeleteEntryOpen] = useState(false);
   const [generatorOpen, setGeneratorOpen] = useState(false);
@@ -356,7 +366,13 @@ export default function Dashboard() {
         if (active) {
           setDecryptedEntry(entry);
           setRevealPassword(false);
-          setAttachmentsList(getEntryAttachments(entry.id, entry.title));
+          invoke<any[]>("list_attachments", { entryId: entry.id })
+            .then(res => {
+              if (active) setAttachmentsList(res);
+            })
+            .catch(err => {
+              console.error("Failed to load attachments:", err);
+            });
           logEvent("Viewed", entry.title, "Detail panel");
         }
       } catch (err: any) {
@@ -384,10 +400,16 @@ export default function Dashboard() {
       }, 1000);
     } else if (autotypeOpen && autotypeTimer === 0) {
       setAutotypeOpen(false);
-      alert(`[Autotype Triggered]\nTyping: ${decryptedEntry?.username || ""} -> Tab -> •••••••• -> Enter`);
+      if (selectedEntryId) {
+        invoke("submit_autotype_selection", { id: selectedEntryId }).catch(err => {
+          console.error("Autotype failed:", err);
+        });
+        localStorage.setItem("checklist_autotype", "true");
+        window.dispatchEvent(new Event("storage"));
+      }
     }
     return () => clearTimeout(t);
-  }, [autotypeOpen, autotypeTimer, decryptedEntry]);
+  }, [autotypeOpen, autotypeTimer, decryptedEntry, selectedEntryId]);
 
   // Compute password score/status dynamically
   const evaluateEntryStatus = (entryId: string): "safe" | "weak" | "reused" | "breached" => {
@@ -514,6 +536,8 @@ export default function Dashboard() {
     copyToClipboard(text).then(() => {
       useVaultStore.getState().startClipboardCountdown();
       logEvent("Copied", title, type);
+      localStorage.setItem("checklist_copied", "true");
+      window.dispatchEvent(new Event("storage"));
     }).catch(err => {
       console.error("Failed to copy text:", err);
     });
@@ -603,6 +627,7 @@ export default function Dashboard() {
       }
       
       setAddEntryOpen(false);
+      sessionStorage.removeItem("clavis_coaching_active");
     } catch (err: any) {
       setFormError(err.message || String(err));
     }
@@ -658,25 +683,58 @@ export default function Dashboard() {
     setGeneratorOpen(true);
   };
 
-  // Add dummy file attachments helper
-  const handleAddFileMock = () => {
-    const files = [
-      { name: "backup-codes.txt", size: 1.5 * 1024 },
-      { name: "license-key.json", size: 8 * 1024 }
-    ];
-    const pick = files[Math.floor(Math.random() * files.length)];
-    const updated = [...attachmentsList, pick];
-    setAttachmentsList(updated);
-    if (selectedEntryId) {
-      setEntryAttachments(selectedEntryId, updated);
+  const handleAddFile = async () => {
+    if (!selectedEntryId) return;
+    try {
+      const file = await open({
+        multiple: false,
+        title: "Select File to Attach"
+      });
+      if (file) {
+        const path = file as string;
+        const res = await invoke<any>("attach_file_to_entry", {
+          entryId: selectedEntryId,
+          sourcePath: path
+        });
+        setAttachmentsList(prev => [...prev, res]);
+        showToast("Success", "File attached successfully!", "success");
+      }
+    } catch (err: any) {
+      showToast("Error", "Failed to attach file: " + err, "error");
     }
   };
 
-  const handleRemoveFileMock = (fileName: string) => {
-    const updated = attachmentsList.filter(f => f.name !== fileName);
-    setAttachmentsList(updated);
-    if (selectedEntryId) {
-      setEntryAttachments(selectedEntryId, updated);
+  const handleDownloadFile = async (fileName: string) => {
+    if (!selectedEntryId) return;
+    try {
+      const target = await save({
+        defaultPath: fileName,
+        title: "Download Attachment"
+      });
+      if (target) {
+        await invoke("download_attachment", {
+          entryId: selectedEntryId,
+          fileName,
+          targetPath: target
+        });
+        showToast("Success", "File downloaded successfully!", "success");
+      }
+    } catch (err: any) {
+      showToast("Error", "Failed to download file: " + err, "error");
+    }
+  };
+
+  const handleRemoveFile = async (fileName: string) => {
+    if (!selectedEntryId) return;
+    try {
+      await invoke("delete_attachment", {
+        entryId: selectedEntryId,
+        fileName
+      });
+      setAttachmentsList(prev => prev.filter(f => f.name !== fileName));
+      showToast("Success", "Attachment deleted.", "success");
+    } catch (err: any) {
+      showToast("Error", "Failed to delete file: " + err, "error");
     }
   };
 
@@ -726,7 +784,7 @@ export default function Dashboard() {
     <div className="flex h-screen flex-1 min-w-0 bg-background text-foreground overflow-hidden">
       
       {/* 1. COLLAPSIBLE LEFT PANEL (180px wide) - Change 2 Tags + Smart Filters */}
-      <aside className="w-[180px] shrink-0 border-r border-border bg-sidebar/50 p-3 space-y-5 overflow-y-auto flex flex-col justify-between select-none">
+      <aside id="tour-sidebar" className="w-[180px] shrink-0 border-r border-border bg-sidebar/50 p-3 space-y-5 overflow-y-auto flex flex-col justify-between select-none">
         <div className="space-y-5">
           {/* Section 0: Vaults */}
           <section className="space-y-2">
@@ -949,6 +1007,34 @@ export default function Dashboard() {
               )}
             </div>
           </section>
+
+          {/* Getting Started Sidebar Checklist Widget */}
+          {checklistProgress < 100 && (
+            <div className="mt-auto pt-4 border-t border-border/40 space-y-2">
+              <div 
+                onClick={() => setCurrentView("help")}
+                className="rounded-lg border border-border/60 bg-card/45 p-2.5 hover:bg-muted/30 transition-colors cursor-pointer flex items-center justify-between"
+              >
+                <div className="space-y-0.5 min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Getting Started</span>
+                  <span className="text-[9px] text-muted-foreground block truncate">Setup Clavis vault</span>
+                </div>
+                <div className="h-6 w-6 shrink-0 relative flex items-center justify-center text-[8px] font-bold">
+                  <svg className="absolute inset-0 h-full w-full -rotate-90">
+                    <circle cx="12" cy="12" r="10" className="stroke-muted/30 fill-none" strokeWidth="2" />
+                    <circle 
+                      cx="12" cy="12" r="10" 
+                      className="stroke-purple fill-none transition-all duration-500" 
+                      strokeWidth="2"
+                      strokeDasharray="62.8"
+                      strokeDashoffset={62.8 - (62.8 * checklistProgress) / 100}
+                    />
+                  </svg>
+                  {checklistCount}/8
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -957,12 +1043,26 @@ export default function Dashboard() {
         {/* Top Bar */}
         <header className="flex items-center gap-3 border-b border-border px-6 py-4 shrink-0">
           <h1 className="text-sm font-semibold">All entries</h1>
+          <PageHelp 
+            title="Dashboard Overview"
+            description="Manage your secure passwords and TOTP details here. Use partitions on the left sidebar to isolate accounts."
+            tips={[
+              "Use search to filter entries instantly.",
+              "Select any item to view detail pane on the right."
+            ]}
+          />
 
-          <div className="relative ml-auto flex-1 max-w-xs">
+          <div id="tour-search" className="relative ml-auto flex-1 max-w-xs">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => {
+                setQuery(e.target.value);
+                if (e.target.value.trim().length > 0) {
+                  localStorage.setItem("checklist_searched", "true");
+                  window.dispatchEvent(new Event("storage"));
+                }
+              }}
               placeholder="Search passwords..."
               className="h-8 pl-8 text-xs bg-muted/40 w-full"
             />
@@ -981,6 +1081,7 @@ export default function Dashboard() {
           </select>
 
           <Button
+            id="tour-add-entry"
             onClick={handleOpenAdd}
             className="h-8 text-xs bg-purple text-white hover:bg-purple/90 shrink-0 gap-1"
           >
@@ -1010,7 +1111,7 @@ export default function Dashboard() {
         </div>
 
         {/* Grouped scrollable list */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+        <div id="tour-entry-list" className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
           
           {/* Active Tag filter indicator */}
           {(activeTag || activeFilter) && (
@@ -1094,18 +1195,22 @@ export default function Dashboard() {
             </section>
           ))}
 
-          {groupedEntries.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-48 text-center">
-              <Search className="h-6 w-6 text-muted-foreground mb-2 opacity-50" />
-              <p className="text-xs text-muted-foreground">No matching entries found.</p>
-            </div>
+          {entries.length === 0 ? (
+            <EmptyState onAdd={handleOpenAdd} />
+          ) : (
+            groupedEntries.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-48 text-center animate-fade-in">
+                <Search className="h-6 w-6 text-muted-foreground mb-2 opacity-50" />
+                <p className="text-xs text-muted-foreground">No matching entries found.</p>
+              </div>
+            )
           )}
 
         </div>
       </div>
 
       {/* 3. RIGHT PANEL: Details Panel (224px wide) */}
-      <aside className={cn(
+      <aside id="tour-detail-pane" className={cn(
         "flex h-screen w-[224px] shrink-0 flex-col border-l border-border bg-sidebar transition-all duration-300",
         selectedEntryId ? "translate-x-0" : "translate-x-full w-0 border-l-0"
       )}>
@@ -1215,18 +1320,36 @@ export default function Dashboard() {
                         {revealPassword ? decryptedEntry.password : "••••••••••••"}
                       </span>
                       <button 
+                        id="tour-reveal-eye"
                         onClick={() => setRevealPassword(r => !r)} 
-                        className="rounded p-1 text-muted-foreground hover:text-foreground"
+                        className="rounded p-1 text-muted-foreground hover:text-foreground cursor-pointer"
                       >
                         {revealPassword ? <EyeOff size={11} /> : <Eye size={11} />}
                       </button>
                       <button 
+                        id="tour-copy-button"
                         onClick={() => handleCopyText(decryptedEntry.password, decryptedEntry.title, "Password")}
-                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0 cursor-pointer"
                       >
                         <Copy size={11} />
                       </button>
                     </div>
+
+                    {/* Inline HIBP Breach Warning Banner */}
+                    {breachCount !== null && breachCount > 0 && (
+                      <div className="mt-2 p-3 bg-danger/10 border border-danger/20 rounded-lg text-[10px] text-danger/90 leading-relaxed space-y-1 animate-fade-in">
+                        <div className="font-bold text-danger flex items-center gap-1">
+                          <AlertTriangle size={12} className="shrink-0" />
+                          <span>Security Check: Leaked Password</span>
+                        </div>
+                        <p>
+                          This password was seen in historical public data leaks <strong>{breachCount.toLocaleString()} times</strong>. Your Clavis vault has not been hacked, but since this password is known to attackers, we recommend changing it.
+                        </p>
+                        <div className="text-[9px] text-muted-foreground border-t border-danger/15 pt-1.5 mt-1">
+                          <strong>Privacy Note:</strong> Checked securely via k-anonymity. Only the first 5 characters of your SHA-1 hash were shared.
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Website field */}
@@ -1286,14 +1409,14 @@ export default function Dashboard() {
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0">
                             <button
-                              onClick={() => alert(`Downloading ${file.name}`)}
-                              className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                              onClick={() => handleDownloadFile(file.name)}
+                              className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground cursor-pointer"
                             >
                               <Download size={11} />
                             </button>
                             <button
-                              onClick={() => handleRemoveFileMock(file.name)}
-                              className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-danger"
+                              onClick={() => handleRemoveFile(file.name)}
+                              className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-danger cursor-pointer"
                             >
                               <X size={11} />
                             </button>
@@ -1305,7 +1428,7 @@ export default function Dashboard() {
                       )}
                       
                       <button
-                        onClick={handleAddFileMock}
+                         onClick={handleAddFile}
                         className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-border px-2 py-1.5 text-[10px] text-muted-foreground hover:border-purple/60 hover:text-foreground mt-1 transition-colors"
                       >
                         <Plus size={10} />
@@ -1337,6 +1460,7 @@ export default function Dashboard() {
             {/* Bottom Actions */}
             <div className="flex gap-2 border-t border-border p-3 shrink-0 bg-sidebar/80">
               <Button 
+                id="tour-edit-button"
                 size="sm" 
                 onClick={handleOpenEdit}
                 className="flex-1 text-xs bg-purple text-white hover:bg-purple/90 gap-1 font-semibold"
@@ -1344,6 +1468,7 @@ export default function Dashboard() {
                 <Edit size={11} /> Edit
               </Button>
               <Button 
+                id="tour-delete-button"
                 size="sm" 
                 variant="outline" 
                 onClick={() => {
@@ -1391,6 +1516,11 @@ export default function Dashboard() {
                   required
                   autoFocus
                 />
+                {coachingActive && !formTitle && (
+                  <p className="text-[9px] text-purple font-semibold animate-pulse mt-0.5">
+                    💡 Action Required: Type the site name here (e.g. GitHub or Google).
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -1413,6 +1543,11 @@ export default function Dashboard() {
                   onChange={e => setFormUsername(e.target.value)}
                   placeholder="Username or email"
                 />
+                {coachingActive && formTitle && !formUsername && (
+                  <p className="text-[9px] text-purple font-semibold animate-pulse mt-0.5">
+                    💡 Action Required: Enter your email or login ID here.
+                  </p>
+                )}
               </div>
 
               {/* Password row with generate */}
@@ -1427,6 +1562,11 @@ export default function Dashboard() {
                       placeholder="••••••••••••"
                       required
                     />
+                    {coachingActive && formUsername && !formPassword && (
+                      <p className="text-[9px] text-purple font-semibold animate-pulse mt-0.5">
+                        💡 Action Required: Type a password, or use the generate button to make a strong one.
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={() => setRevealPassword(r => !r)}
@@ -1739,7 +1879,7 @@ export default function Dashboard() {
             
             <div className="space-y-1">
               <h2 className="text-sm font-bold tracking-tight">Switch to your app</h2>
-              <p className="text-xs text-muted-foreground">PassVault will type your credentials in:</p>
+              <p className="text-xs text-muted-foreground">Clavis will type your credentials in:</p>
             </div>
 
             {/* Countdown animation circular progress */}

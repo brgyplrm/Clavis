@@ -5,7 +5,9 @@ fn get_app_data_dir() -> Option<PathBuf> {
     let bundle_id = "com.achyllisss.clavis";
     #[cfg(target_os = "windows")]
     {
-        std::env::var("APPDATA").ok().map(|p| PathBuf::from(p).join(bundle_id))
+        std::env::var("APPDATA")
+            .ok()
+            .map(|p| PathBuf::from(p).join(bundle_id))
     }
     #[cfg(target_os = "macos")]
     {
@@ -30,13 +32,15 @@ fn get_app_data_dir() -> Option<PathBuf> {
 fn query_ipc_server() -> serde_json::Value {
     let app_dir = match get_app_data_dir() {
         Some(dir) => dir,
-        None => return serde_json::json!({ "success": false, "error": "Could not resolve app data directory" }),
+        None => {
+            return serde_json::json!({ "success": false, "error": "Could not resolve app data directory" })
+        }
     };
 
     #[cfg(unix)]
     {
-        use std::os::unix::net::UnixStream;
         use std::io::Read;
+        use std::os::unix::net::UnixStream;
 
         let socket_path = app_dir.join("ipc.sock");
         let mut stream = match UnixStream::connect(&socket_path) {
@@ -51,7 +55,9 @@ fn query_ipc_server() -> serde_json::Value {
                     .join("ipc.sock");
                 match UnixStream::connect(&fallback_path) {
                     Ok(s) => s,
-                    Err(_) => return serde_json::json!({ "success": false, "error": format!("Could not connect to IPC socket: {}", e) }),
+                    Err(_) => {
+                        return serde_json::json!({ "success": false, "error": format!("Could not connect to IPC socket: {}", e) })
+                    }
                 }
             }
         };
@@ -70,17 +76,15 @@ fn query_ipc_server() -> serde_json::Value {
 
     #[cfg(windows)]
     {
-        use std::io::Read;
         use std::fs::OpenOptions;
+        use std::io::Read;
 
         let pipe_name = r"\\.\pipe\com.achyllisss.clavis.ipc";
-        let mut file = match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(pipe_name)
-        {
+        let mut file = match OpenOptions::new().read(true).write(true).open(pipe_name) {
             Ok(f) => f,
-            Err(e) => return serde_json::json!({ "success": false, "error": format!("Could not connect to Named Pipe: {}", e) }),
+            Err(e) => {
+                return serde_json::json!({ "success": false, "error": format!("Could not connect to Named Pipe: {}", e) })
+            }
         };
 
         let mut buf = String::new();
