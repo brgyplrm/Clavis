@@ -2,6 +2,8 @@ name: Publish Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -19,36 +21,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set OpenSSL path (Windows only)
-        if: matrix.platform == 'windows-latest'
-        shell: bash
-        run: |
-          # Find the main OpenSSL directory
-          if [ -d "C:/Program Files/OpenSSL" ]; then
-            openssl_dir="C:\\Program Files\\OpenSSL"
-            search_dir="/c/Program Files/OpenSSL"
-          elif [ -d "C:/Program Files/OpenSSL-Win64" ]; then
-            openssl_dir="C:\\Program Files\\OpenSSL-Win64"
-            search_dir="/c/Program Files/OpenSSL-Win64"
-          else
-            echo "::error::OpenSSL directory not found!"
-            exit 1
-          fi
-          
-          echo "OPENSSL_DIR=$openssl_dir" >> $GITHUB_ENV
-          
-          # Dynamically locate libcrypto.lib inside the directory
-          lib_file=$(find "$search_dir" -name "libcrypto.lib" | head -n 1)
-          if [ -n "$lib_file" ]; then
-            lib_dir=$(dirname "$lib_file")
-            windows_lib_dir=$(cygpath -w "$lib_dir")
-            echo "Found libcrypto.lib at: $windows_lib_dir"
-            echo "OPENSSL_LIB_DIR=$windows_lib_dir" >> $GITHUB_ENV
-          else
-            echo "::error::libcrypto.lib not found!"
-            exit 1
-          fi
 
       - name: Install system dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-latest'
