@@ -36,6 +36,7 @@ fn query_ipc_server() -> serde_json::Value {
             return serde_json::json!({ "success": false, "error": "Could not resolve app data directory" })
         }
     };
+    let _ = app_dir;
 
     #[cfg(unix)]
     {
