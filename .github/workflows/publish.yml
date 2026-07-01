@@ -20,6 +20,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set OpenSSL path (Windows only)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          if [ -d "C:/Program Files/OpenSSL" ]; then
+            echo "OPENSSL_DIR=C:\\Program Files\\OpenSSL" >> $GITHUB_ENV
+          elif [ -d "C:/Program Files/OpenSSL-Win64" ]; then
+            echo "OPENSSL_DIR=C:\\Program Files\\OpenSSL-Win64" >> $GITHUB_ENV
+          else
+            echo "::error::OpenSSL directory not found!"
+            exit 1
+          fi
+
       - name: Install system dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-latest'
         run: |

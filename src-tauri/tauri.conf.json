@@ -28,7 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "licenseFile": "assets/installer/EULA.txt",
+    "licenseFile": "../assets/installer/EULA.txt",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,14 +39,14 @@
     "windows": {
       "nsis": {
         "installMode": "both",
-        "headerImage": "assets/installer/installer-header.bmp",
-        "sidebarImage": "assets/installer/installer-sidebar.bmp",
-        "installerIcon": "assets/installer/installer.ico"
+        "headerImage": "../assets/installer/installer-header.bmp",
+        "sidebarImage": "../assets/installer/installer-sidebar.bmp",
+        "installerIcon": "../assets/installer/installer.ico"
       }
     },
     "macOS": {
       "dmg": {
-        "background": "assets/installer/dmg-background.png"
+        "background": "../assets/installer/dmg-background.png"
       }
     }
   }

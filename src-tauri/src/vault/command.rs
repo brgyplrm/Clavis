@@ -1793,6 +1793,7 @@ pub async fn execute_import(
 
   #[tauri::command]
   pub async fn set_autostart(enabled: bool) -> Result<()> {
+      let _ = enabled;
       #[cfg(target_os = "linux")]
       {
           let home = std::env::var("HOME").unwrap_or_default();
