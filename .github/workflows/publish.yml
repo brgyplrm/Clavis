@@ -24,12 +24,29 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: bash
         run: |
+          # Find the main OpenSSL directory
           if [ -d "C:/Program Files/OpenSSL" ]; then
-            echo "OPENSSL_DIR=C:\\Program Files\\OpenSSL" >> $GITHUB_ENV
+            openssl_dir="C:\\Program Files\\OpenSSL"
+            search_dir="/c/Program Files/OpenSSL"
           elif [ -d "C:/Program Files/OpenSSL-Win64" ]; then
-            echo "OPENSSL_DIR=C:\\Program Files\\OpenSSL-Win64" >> $GITHUB_ENV
+            openssl_dir="C:\\Program Files\\OpenSSL-Win64"
+            search_dir="/c/Program Files/OpenSSL-Win64"
           else
             echo "::error::OpenSSL directory not found!"
+            exit 1
+          fi
+          
+          echo "OPENSSL_DIR=$openssl_dir" >> $GITHUB_ENV
+          
+          # Dynamically locate libcrypto.lib inside the directory
+          lib_file=$(find "$search_dir" -name "libcrypto.lib" | head -n 1)
+          if [ -n "$lib_file" ]; then
+            lib_dir=$(dirname "$lib_file")
+            windows_lib_dir=$(cygpath -w "$lib_dir")
+            echo "Found libcrypto.lib at: $windows_lib_dir"
+            echo "OPENSSL_LIB_DIR=$windows_lib_dir" >> $GITHUB_ENV
+          else
+            echo "::error::libcrypto.lib not found!"
             exit 1
           fi
 

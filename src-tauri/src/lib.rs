@@ -408,9 +408,9 @@ pub fn run() {
             }
         }
         tauri::RunEvent::Exit => {
-            if let Ok(app_dir) = app_handle.path().app_data_dir() {
-                #[cfg(unix)]
-                {
+            #[cfg(unix)]
+            {
+                if let Ok(app_dir) = app_handle.path().app_data_dir() {
                     let socket_path = app_dir.join("ipc.sock");
                     let _ = std::fs::remove_file(socket_path);
                 }
